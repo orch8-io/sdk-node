@@ -8,6 +8,7 @@
     "rootDir": "src",
     "strict": true,
     "esModuleInterop": true,
+    "sourceMap": true,
     "skipLibCheck": true
   },
   "include": ["src"]

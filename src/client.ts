@@ -50,22 +50,26 @@ export class Orch8Client {
   // Internal HTTP helpers
   // ---------------------------------------------------------------------------
 
+  private buildHeaders(extra?: Record<string, string>): Record<string, string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.extraHeaders,
+      ...extra,
+    };
+    if (this.tenantId) {
+      headers["X-Tenant-Id"] = this.tenantId;
+    }
+    return headers;
+  }
+
   private async request<T>(
     method: string,
     path: string,
     body?: unknown,
   ): Promise<T> {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...this.extraHeaders,
-    };
-    if (this.tenantId) {
-      headers["X-Tenant-Id"] = this.tenantId;
-    }
-
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
-      headers,
+      headers: this.buildHeaders(),
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
 
@@ -259,17 +263,9 @@ export class Orch8Client {
   async *streamInstance(
     id: string,
   ): AsyncGenerator<Record<string, unknown>> {
-    const headers: Record<string, string> = {
-      Accept: "text/event-stream",
-      ...this.extraHeaders,
-    };
-    if (this.tenantId) {
-      headers["X-Tenant-Id"] = this.tenantId;
-    }
-
     const res = await fetch(`${this.baseUrl}/instances/${id}/stream`, {
       method: "GET",
-      headers,
+      headers: this.buildHeaders({ Accept: "text/event-stream" }),
     });
 
     if (!res.ok) {

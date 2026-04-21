@@ -1,10 +1,11 @@
 import type { WorkerTask } from "./types.js";
+import type { Orch8Client } from "./client.js";
 
 export type HandlerFn = (task: WorkerTask) => Promise<unknown>;
 
 export interface WorkerConfig {
   /** Base URL of the Orch8 engine API (e.g. "http://localhost:8080"). */
-  engineUrl: string;
+  engineUrl?: string;
   /** Unique identifier for this worker instance. */
   workerId: string;
   /** Map of handler names to async handler functions. */
@@ -24,13 +25,18 @@ export interface WorkerConfig {
   onTaskComplete?: (task: WorkerTask, output: unknown) => void;
   /** Called after a task fails. */
   onTaskFail?: (task: WorkerTask, error: string) => void;
+  /**
+   * Optional Orch8Client to use for API calls. When provided, the worker
+   * delegates all HTTP operations to the client instead of using raw fetch.
+   * This ensures consistent auth, headers, and base URL handling.
+   */
+  client?: Orch8Client;
 }
 
 export class Orch8Worker {
   private readonly config: Required<
     Pick<
       WorkerConfig,
-      | "engineUrl"
       | "workerId"
       | "pollIntervalMs"
       | "heartbeatIntervalMs"
@@ -38,13 +44,15 @@ export class Orch8Worker {
       | "circuitBreakerCheck"
     >
   > & {
+    engineUrl: string;
     handlers: Record<string, HandlerFn>;
     onTaskComplete?: (task: WorkerTask, output: unknown) => void;
     onTaskFail?: (task: WorkerTask, error: string) => void;
+    client?: Orch8Client;
   };
 
   private running = false;
-  private pollTimers: NodeJS.Timeout[] = [];
+  private pollTimers = new Map<string, NodeJS.Timeout>();
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private inFlightTasks = new Map<string, WorkerTask>();
   private executingPromises = new Set<Promise<void>>();
@@ -55,8 +63,11 @@ export class Orch8Worker {
   private static readonly MAX_BACKOFF_MS = 30_000;
 
   constructor(config: WorkerConfig) {
+    if (!config.client && !config.engineUrl) {
+      throw new Error("WorkerConfig must provide either client or engineUrl");
+    }
     this.config = {
-      engineUrl: config.engineUrl.replace(/\/$/, ""),
+      engineUrl: config.engineUrl?.replace(/\/$/, "") ?? "",
       workerId: config.workerId,
       handlers: config.handlers,
       pollIntervalMs: config.pollIntervalMs ?? 1000,
@@ -65,6 +76,7 @@ export class Orch8Worker {
       circuitBreakerCheck: config.circuitBreakerCheck ?? false,
       onTaskComplete: config.onTaskComplete,
       onTaskFail: config.onTaskFail,
+      client: config.client,
     };
     this.concurrencySemaphore = this.config.maxConcurrent;
   }
@@ -86,6 +98,10 @@ export class Orch8Worker {
   }
 
   private schedulePoll(handlerName: string, delayMs: number): void {
+    // Clear any existing timer for this handler to prevent memory leak.
+    const existing = this.pollTimers.get(handlerName);
+    if (existing) clearTimeout(existing);
+
     const timer = setTimeout(() => {
       if (!this.running) return;
       void this.poll(handlerName).finally(() => {
@@ -101,13 +117,13 @@ export class Orch8Worker {
         this.schedulePoll(handlerName, nextDelay);
       });
     }, delayMs);
-    this.pollTimers.push(timer);
+    this.pollTimers.set(handlerName, timer);
   }
 
   async stop(): Promise<void> {
     this.running = false;
-    for (const timer of this.pollTimers) clearTimeout(timer);
-    this.pollTimers = [];
+    for (const timer of this.pollTimers.values()) clearTimeout(timer);
+    this.pollTimers.clear();
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
@@ -125,13 +141,18 @@ export class Orch8Worker {
     // Circuit breaker check: skip polling if the handler's circuit is open.
     if (this.config.circuitBreakerCheck) {
       try {
-        const cbRes = await fetch(
-          `${this.config.engineUrl}/circuit-breakers/${handlerName}`,
-          { method: "GET", headers: { "Content-Type": "application/json" } },
-        );
-        if (cbRes.ok) {
-          const cb = (await cbRes.json()) as { state: string };
+        if (this.config.client) {
+          const cb = await this.config.client.getCircuitBreaker(handlerName);
           if (cb.state === "open") return;
+        } else {
+          const cbRes = await fetch(
+            `${this.config.engineUrl}/circuit-breakers/${handlerName}`,
+            { method: "GET", headers: { "Content-Type": "application/json" } },
+          );
+          if (cbRes.ok) {
+            const cb = (await cbRes.json()) as { state: string };
+            if (cb.state === "open") return;
+          }
         }
       } catch {
         // If the check fails, proceed with polling anyway.
@@ -140,29 +161,40 @@ export class Orch8Worker {
 
     try {
       const limit = Math.min(this.concurrencySemaphore, this.config.maxConcurrent);
-      const res = await fetch(`${this.config.engineUrl}/workers/tasks/poll`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+
+      let tasks: WorkerTask[];
+      if (this.config.client) {
+        tasks = await this.config.client.pollTasks({
           handler_name: handlerName,
           worker_id: this.config.workerId,
           limit,
-        }),
-      });
+        });
+      } else {
+        const res = await fetch(`${this.config.engineUrl}/workers/tasks/poll`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            handler_name: handlerName,
+            worker_id: this.config.workerId,
+            limit,
+          }),
+        });
 
-      if (!res.ok) {
-        this.consecutiveFailures.set(
-          handlerName,
-          (this.consecutiveFailures.get(handlerName) ?? 0) + 1,
-        );
-        return;
+        if (!res.ok) {
+          this.consecutiveFailures.set(
+            handlerName,
+            (this.consecutiveFailures.get(handlerName) ?? 0) + 1,
+          );
+          return;
+        }
+        tasks = (await res.json()) as WorkerTask[];
       }
 
       // Reset backoff on successful poll.
       this.consecutiveFailures.set(handlerName, 0);
 
-      const tasks: WorkerTask[] = await res.json() as WorkerTask[];
       for (const task of tasks) {
+        if (this.concurrencySemaphore <= 0) break;
         this.concurrencySemaphore--;
         this.inFlightTasks.set(task.id, task);
         const p = this.executeTask(task);
@@ -218,14 +250,21 @@ export class Orch8Worker {
 
   private async completeTask(taskId: string, output: unknown): Promise<void> {
     try {
-      await fetch(`${this.config.engineUrl}/workers/tasks/${taskId}/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      if (this.config.client) {
+        await this.config.client.completeTask(taskId, {
           worker_id: this.config.workerId,
           output: output ?? {},
-        }),
-      });
+        });
+      } else {
+        await fetch(`${this.config.engineUrl}/workers/tasks/${taskId}/complete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            worker_id: this.config.workerId,
+            output: output ?? {},
+          }),
+        });
+      }
     } catch {
       // Will be reaped and retried.
     }
@@ -233,15 +272,23 @@ export class Orch8Worker {
 
   private async failTask(taskId: string, message: string, retryable: boolean): Promise<void> {
     try {
-      await fetch(`${this.config.engineUrl}/workers/tasks/${taskId}/fail`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      if (this.config.client) {
+        await this.config.client.failTask(taskId, {
           worker_id: this.config.workerId,
           message,
           retryable,
-        }),
-      });
+        });
+      } else {
+        await fetch(`${this.config.engineUrl}/workers/tasks/${taskId}/fail`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            worker_id: this.config.workerId,
+            message,
+            retryable,
+          }),
+        });
+      }
     } catch {
       // Will be reaped and retried.
     }
@@ -250,13 +297,18 @@ export class Orch8Worker {
   private async sendHeartbeats(): Promise<void> {
     const ids = Array.from(this.inFlightTasks.keys());
     await Promise.allSettled(
-      ids.map((taskId) =>
-        fetch(`${this.config.engineUrl}/workers/tasks/${taskId}/heartbeat`, {
+      ids.map((taskId) => {
+        if (this.config.client) {
+          return this.config.client.heartbeatTask(taskId, {
+            worker_id: this.config.workerId,
+          });
+        }
+        return fetch(`${this.config.engineUrl}/workers/tasks/${taskId}/heartbeat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ worker_id: this.config.workerId }),
-        }),
-      ),
+        });
+      }),
     );
   }
 }

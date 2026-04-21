@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Orch8Worker } from "../worker.js";
+import { Orch8Client } from "../client.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -263,6 +264,209 @@ describe("Orch8Worker", () => {
       expect(mockFetch).toHaveBeenCalledTimes(6);
 
       await stopWorker(worker);
+    });
+  });
+
+  // ---- Task execution ------------------------------------------------------
+
+  describe("Task execution", () => {
+    it("calls completeTask on success", async () => {
+      const handler = vi.fn().mockResolvedValue({ result: 42 });
+
+      const worker = new Orch8Worker({
+        engineUrl: "http://localhost:8080",
+        workerId: "w-1",
+        handlers: { "my-handler": handler },
+        pollIntervalMs: 100,
+      });
+
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse([
+          {
+            id: "wt-1",
+            instance_id: "inst-1",
+            block_id: "b-1",
+            handler_name: "my-handler",
+            state: "claimed",
+            created_at: "2025-01-01T00:00:00Z",
+          },
+        ]),
+      );
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true })); // completeTask
+      mockFetch.mockResolvedValueOnce(jsonResponse([])); // next poll
+
+      await worker.start();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      const completeCall = mockFetch.mock.calls.find(
+        (c) => c[0] === "http://localhost:8080/workers/tasks/wt-1/complete",
+      );
+      expect(completeCall).toBeDefined();
+      expect(completeCall[1].body).toContain("42");
+
+      await stopWorker(worker);
+    });
+
+    it("calls failTask on handler error", async () => {
+      const handler = vi.fn().mockRejectedValue(new Error("boom"));
+
+      const worker = new Orch8Worker({
+        engineUrl: "http://localhost:8080",
+        workerId: "w-1",
+        handlers: { "my-handler": handler },
+        pollIntervalMs: 100,
+      });
+
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse([
+          {
+            id: "wt-1",
+            instance_id: "inst-1",
+            block_id: "b-1",
+            handler_name: "my-handler",
+            state: "claimed",
+            created_at: "2025-01-01T00:00:00Z",
+          },
+        ]),
+      );
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true })); // failTask
+      mockFetch.mockResolvedValueOnce(jsonResponse([])); // next poll
+
+      await worker.start();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(100);
+
+      const failCall = mockFetch.mock.calls.find(
+        (c) => c[0] === "http://localhost:8080/workers/tasks/wt-1/fail",
+      );
+      expect(failCall).toBeDefined();
+      expect(failCall[1].body).toContain("boom");
+      expect(failCall[1].body).toContain('"retryable":false');
+
+      await stopWorker(worker);
+    });
+
+    it("times out tasks exceeding timeout_ms", async () => {
+      const handler = vi.fn(
+        () => new Promise((resolve) => setTimeout(resolve, 10_000)),
+      );
+
+      const worker = new Orch8Worker({
+        engineUrl: "http://localhost:8080",
+        workerId: "w-1",
+        handlers: { "my-handler": handler },
+        pollIntervalMs: 100,
+      });
+
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse([
+          {
+            id: "wt-1",
+            instance_id: "inst-1",
+            block_id: "b-1",
+            handler_name: "my-handler",
+            state: "claimed",
+            timeout_ms: 50,
+            created_at: "2025-01-01T00:00:00Z",
+          },
+        ]),
+      );
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true })); // failTask
+      mockFetch.mockResolvedValueOnce(jsonResponse([])); // next poll
+
+      await worker.start();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(60); // exceed 50ms timeout
+      await vi.advanceTimersByTimeAsync(100);
+
+      const failCall = mockFetch.mock.calls.find(
+        (c) => c[0] === "http://localhost:8080/workers/tasks/wt-1/fail",
+      );
+      expect(failCall).toBeDefined();
+      expect(failCall[1].body).toContain("task timed out");
+
+      await stopWorker(worker);
+    });
+
+    it("enforces concurrency limit", async () => {
+      let running = 0;
+      let maxRunning = 0;
+      const handler = vi.fn(async () => {
+        running++;
+        if (running > maxRunning) maxRunning = running;
+        await new Promise((r) => setTimeout(r, 500));
+        running--;
+        return { ok: true };
+      });
+
+      const worker = new Orch8Worker({
+        engineUrl: "http://localhost:8080",
+        workerId: "w-1",
+        handlers: { "my-handler": handler },
+        pollIntervalMs: 100,
+        maxConcurrent: 2,
+      });
+
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse([
+          { id: "wt-1", instance_id: "i1", block_id: "b1", handler_name: "my-handler", state: "claimed", created_at: "2025-01-01T00:00:00Z" },
+          { id: "wt-2", instance_id: "i2", block_id: "b2", handler_name: "my-handler", state: "claimed", created_at: "2025-01-01T00:00:00Z" },
+          { id: "wt-3", instance_id: "i3", block_id: "b3", handler_name: "my-handler", state: "claimed", created_at: "2025-01-01T00:00:00Z" },
+        ]),
+      );
+      // completeTask responses
+      mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
+
+      await worker.start();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(maxRunning).toBeLessThanOrEqual(2);
+
+      await stopWorker(worker);
+    });
+  });
+
+  // ---- Client delegation ---------------------------------------------------
+
+  describe("Client delegation", () => {
+    it("uses Orch8Client when provided", async () => {
+      const handler = vi.fn().mockResolvedValue({ ok: true });
+      const client = new Orch8Client({ baseUrl: "http://localhost:8080" });
+
+      const pollSpy = vi
+        .spyOn(client, "pollTasks")
+        .mockResolvedValue([]);
+
+      const worker = new Orch8Worker({
+        client,
+        workerId: "w-1",
+        handlers: { "my-handler": handler },
+        pollIntervalMs: 100,
+      });
+
+      await worker.start();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(pollSpy).toHaveBeenCalledWith({
+        handler_name: "my-handler",
+        worker_id: "w-1",
+        limit: 10,
+      });
+
+      await stopWorker(worker);
+      pollSpy.mockRestore();
+    });
+
+    it("throws when neither client nor engineUrl is provided", () => {
+      expect(() => {
+        new Orch8Worker({
+          workerId: "w-1",
+          handlers: { "h": vi.fn() },
+        } as unknown as ConstructorParameters<typeof Orch8Worker>[0]);
+      }).toThrow("must provide either client or engineUrl");
     });
   });
 });
