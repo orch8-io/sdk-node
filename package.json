@@ -1,5 +1,5 @@
 {
-  "name": "@orch8/sdk",
+  "name": "@orch8.io/sdk",
   "version": "0.1.0",
   "description": "Node.js SDK for Orch8 workflow engine",
   "main": "dist/index.js",
@@ -20,7 +20,7 @@
       }
     }
   },
-  "files": ["dist"],
+  "files": ["dist", "!dist/__tests__", "!dist/**/*.map"],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
