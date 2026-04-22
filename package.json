@@ -28,6 +28,10 @@
     "test:watch": "vitest"
   },
   "keywords": ["orch8", "workflow", "orchestration", "sdk"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/orch8-io/sdk-node"
+  },
   "license": "MIT",
   "dependencies": {
     "zod": "^3.23.0"
