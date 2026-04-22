@@ -29,6 +29,9 @@
   },
   "keywords": ["orch8", "workflow", "orchestration", "sdk"],
   "license": "MIT",
+  "dependencies": {
+    "zod": "^3.23.0"
+  },
   "devDependencies": {
     "typescript": "^5.4.0",
     "@types/node": "^20.0.0",
