@@ -304,7 +304,7 @@ describe("Orch8Worker", () => {
         (c) => c[0] === "http://localhost:8080/workers/tasks/wt-1/complete",
       );
       expect(completeCall).toBeDefined();
-      expect(completeCall[1].body).toContain("42");
+      expect(completeCall![1].body).toContain("42");
 
       await stopWorker(worker);
     });
@@ -342,8 +342,8 @@ describe("Orch8Worker", () => {
         (c) => c[0] === "http://localhost:8080/workers/tasks/wt-1/fail",
       );
       expect(failCall).toBeDefined();
-      expect(failCall[1].body).toContain("boom");
-      expect(failCall[1].body).toContain('"retryable":false');
+      expect(failCall![1].body).toContain("boom");
+      expect(failCall![1].body).toContain('"retryable":false');
 
       await stopWorker(worker);
     });
@@ -385,7 +385,7 @@ describe("Orch8Worker", () => {
         (c) => c[0] === "http://localhost:8080/workers/tasks/wt-1/fail",
       );
       expect(failCall).toBeDefined();
-      expect(failCall[1].body).toContain("task timed out");
+      expect(failCall![1].body).toContain("task timed out");
 
       await stopWorker(worker);
     });
