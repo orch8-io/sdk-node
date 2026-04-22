@@ -121,7 +121,7 @@ describe("Orch8Worker integration", () => {
     const worker = new Orch8Worker({
       engineUrl: "http://localhost:8080",
       workerId: "w-1",
-      handlers: {}, // no handlers registered
+      handlers: { known: async () => ({}) }, // task will have handler_name "missing" — not registered
       pollIntervalMs: 100,
     });
 

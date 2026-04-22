@@ -53,6 +53,7 @@ export class Orch8Client {
   private buildHeaders(extra?: Record<string, string>): Record<string, string> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
+      Accept: "application/json",
       ...this.extraHeaders,
       ...extra,
     };
