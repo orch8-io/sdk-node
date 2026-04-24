@@ -223,11 +223,13 @@ export class Orch8Worker {
       this.config.onTaskComplete?.(task, output);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      // Handler exceptions are non-retryable by default — matches engine
-      // FailRequest default and conservative behavior across SDKs. Users who
-      // want retry-on-throw can call client.failTask with retryable=true
-      // directly from their handler.
-      await this.failTask(task.id, message, false);
+      // If the error exposes a retryable flag, respect it. Otherwise default
+      // to non-retryable (conservative — matches engine FailRequest default).
+      const retryable =
+        err instanceof Error && "retryable" in err
+          ? Boolean((err as Error & { retryable: unknown }).retryable)
+          : false;
+      await this.failTask(task.id, message, retryable);
       this.config.onTaskFail?.(task, message);
     } finally {
       this.inFlightTasks.delete(task.id);
