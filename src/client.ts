@@ -20,6 +20,43 @@ import type {
   ResourcePool,
   PoolResource,
   Credential,
+  SyncRequest,
+  SyncResponse,
+  RegisterDeviceRequest,
+  ResolveApprovalRequest,
+  CreateCommandRequest,
+  CommandPayload,
+  StatusUpdatePayload,
+  MobileDevicesResponse,
+  MobileApprovalsResponse,
+  MobileStatusResponse,
+  IngestTelemetryRequest,
+  IngestErrorRequest,
+  IngestResponse,
+  DashboardQueryType,
+  DashboardResponse,
+  RollbackPolicy,
+  CreatePolicyRequest,
+  ApprovalItem,
+  ApprovalsResponse,
+  CreateInstanceRequest,
+  UpdateStateRequest,
+  UpdateContextRequest,
+  SendSignalRequest,
+  CreateCronRequest,
+  UpdateCronRequest,
+  CreateTriggerRequest,
+  CreateCredentialRequest,
+  UpdateCredentialRequest,
+  CreateSessionRequest,
+  CreatePoolRequest,
+  AddResourceRequest,
+  UpdateResourceRequest,
+  PollRequest,
+  QueuePollRequest,
+  CompleteRequest,
+  FailRequest,
+  HeartbeatRequest,
 } from "./types.js";
 
 export class Orch8Error extends Error {
@@ -123,7 +160,9 @@ export class Orch8Client {
   // Sequences
   // ---------------------------------------------------------------------------
 
-  createSequence(body: Record<string, unknown>): Promise<SequenceDefinition> {
+  createSequence(
+    body: Record<string, unknown>,
+  ): Promise<SequenceDefinition> {
     return this.post<SequenceDefinition>("/sequences", body);
   }
 
@@ -172,7 +211,9 @@ export class Orch8Client {
   // Instances
   // ---------------------------------------------------------------------------
 
-  createInstance(body: Record<string, unknown>): Promise<TaskInstance> {
+  createInstance(
+    body: CreateInstanceRequest | Record<string, unknown>,
+  ): Promise<TaskInstance> {
     return this.post<TaskInstance>("/instances", body);
   }
 
@@ -197,7 +238,7 @@ export class Orch8Client {
   // Callers who need the updated instance should call `getInstance(id)`.
   updateInstanceState(
     id: string,
-    body: Record<string, unknown>,
+    body: UpdateStateRequest | Record<string, unknown>,
   ): Promise<void> {
     return this.patch<void>(`/instances/${id}/state`, body);
   }
@@ -205,7 +246,7 @@ export class Orch8Client {
   // Engine returns 200 with an empty body.
   updateInstanceContext(
     id: string,
-    body: Record<string, unknown>,
+    body: UpdateContextRequest | Record<string, unknown>,
   ): Promise<void> {
     return this.patch<void>(`/instances/${id}/context`, body);
   }
@@ -214,7 +255,7 @@ export class Orch8Client {
   // can correlate the enqueued signal with downstream delivery events.
   sendSignal(
     id: string,
-    body: Record<string, unknown>,
+    body: SendSignalRequest | Record<string, unknown>,
   ): Promise<{ signal_id: string }> {
     return this.post<{ signal_id: string }>(`/instances/${id}/signals`, body);
   }
@@ -330,16 +371,20 @@ export class Orch8Client {
   // Approvals
   // ---------------------------------------------------------------------------
 
-  listApprovals(filter?: Record<string, string>): Promise<TaskInstance[]> {
+  listApprovals(
+    filter?: Record<string, string>,
+  ): Promise<ApprovalsResponse> {
     const params = filter ? `?${new URLSearchParams(filter)}` : "";
-    return this.get<TaskInstance[]>(`/approvals${params}`);
+    return this.get<ApprovalsResponse>(`/approvals${params}`);
   }
 
   // ---------------------------------------------------------------------------
   // Cron
   // ---------------------------------------------------------------------------
 
-  createCron(body: Record<string, unknown>): Promise<CronSchedule> {
+  createCron(
+    body: CreateCronRequest | Record<string, unknown>,
+  ): Promise<CronSchedule> {
     return this.post<CronSchedule>("/cron", body);
   }
 
@@ -356,7 +401,7 @@ export class Orch8Client {
 
   updateCron(
     id: string,
-    body: Record<string, unknown>,
+    body: UpdateCronRequest | Record<string, unknown>,
   ): Promise<CronSchedule> {
     return this.put<CronSchedule>(`/cron/${id}`, body);
   }
@@ -369,7 +414,9 @@ export class Orch8Client {
   // Triggers
   // ---------------------------------------------------------------------------
 
-  createTrigger(body: Record<string, unknown>): Promise<TriggerDef> {
+  createTrigger(
+    body: CreateTriggerRequest | Record<string, unknown>,
+  ): Promise<TriggerDef> {
     return this.post<TriggerDef>("/triggers", body);
   }
 
@@ -429,7 +476,9 @@ export class Orch8Client {
   // Sessions
   // ---------------------------------------------------------------------------
 
-  createSession(body: Record<string, unknown>): Promise<Session> {
+  createSession(
+    body: CreateSessionRequest | Record<string, unknown>,
+  ): Promise<Session> {
     return this.post<Session>("/sessions", body);
   }
 
@@ -463,24 +512,29 @@ export class Orch8Client {
   // Workers
   // ---------------------------------------------------------------------------
 
-  pollTasks(body: Record<string, unknown>): Promise<WorkerTask[]> {
+  pollTasks(
+    body: PollRequest | Record<string, unknown>,
+  ): Promise<WorkerTask[]> {
     return this.post<WorkerTask[]>("/workers/tasks/poll", body);
   }
 
   completeTask(
     id: string,
-    body: Record<string, unknown>,
+    body: CompleteRequest | Record<string, unknown>,
   ): Promise<void> {
     return this.post<void>(`/workers/tasks/${id}/complete`, body);
   }
 
-  failTask(id: string, body: Record<string, unknown>): Promise<void> {
+  failTask(
+    id: string,
+    body: FailRequest | Record<string, unknown>,
+  ): Promise<void> {
     return this.post<void>(`/workers/tasks/${id}/fail`, body);
   }
 
   heartbeatTask(
     id: string,
-    body: Record<string, unknown>,
+    body: HeartbeatRequest | Record<string, unknown>,
   ): Promise<void> {
     return this.post<void>(`/workers/tasks/${id}/heartbeat`, body);
   }
@@ -494,7 +548,9 @@ export class Orch8Client {
     return this.get<Record<string, unknown>>("/workers/tasks/stats");
   }
 
-  pollTasksFromQueue(body: Record<string, unknown>): Promise<WorkerTask[]> {
+  pollTasksFromQueue(
+    body: QueuePollRequest | Record<string, unknown>,
+  ): Promise<WorkerTask[]> {
     return this.post<WorkerTask[]>("/workers/tasks/poll/queue", body);
   }
 
@@ -563,7 +619,9 @@ export class Orch8Client {
     return this.get<ResourcePool[]>(`/pools${params}`);
   }
 
-  createPool(body: Record<string, unknown>): Promise<ResourcePool> {
+  createPool(
+    body: CreatePoolRequest | Record<string, unknown>,
+  ): Promise<ResourcePool> {
     return this.post<ResourcePool>("/pools", body);
   }
 
@@ -581,7 +639,7 @@ export class Orch8Client {
 
   createPoolResource(
     poolId: string,
-    body: Record<string, unknown>,
+    body: AddResourceRequest | Record<string, unknown>,
   ): Promise<PoolResource> {
     return this.post<PoolResource>(`/pools/${poolId}/resources`, body);
   }
@@ -589,7 +647,7 @@ export class Orch8Client {
   updatePoolResource(
     poolId: string,
     resourceId: string,
-    body: Record<string, unknown>,
+    body: UpdateResourceRequest | Record<string, unknown>,
   ): Promise<PoolResource> {
     return this.put<PoolResource>(
       `/pools/${poolId}/resources/${resourceId}`,
@@ -612,7 +670,9 @@ export class Orch8Client {
     return this.get<Credential[]>(`/credentials${params}`);
   }
 
-  createCredential(body: Record<string, unknown>): Promise<Credential> {
+  createCredential(
+    body: CreateCredentialRequest | Record<string, unknown>,
+  ): Promise<Credential> {
     return this.post<Credential>("/credentials", body);
   }
 
@@ -626,9 +686,92 @@ export class Orch8Client {
 
   updateCredential(
     id: string,
-    body: Record<string, unknown>,
+    body: UpdateCredentialRequest | Record<string, unknown>,
   ): Promise<Credential> {
     return this.patch<Credential>(`/credentials/${id}`, body);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Mobile Sync
+  // ---------------------------------------------------------------------------
+
+  mobileSync(body: SyncRequest): Promise<SyncResponse> {
+    return this.post<SyncResponse>("/mobile/sync", body);
+  }
+
+  registerMobileDevice(body: RegisterDeviceRequest): Promise<void> {
+    return this.post<void>("/mobile/devices/register", body);
+  }
+
+  listMobileDevices(): Promise<MobileDevicesResponse> {
+    return this.get<MobileDevicesResponse>("/mobile/devices");
+  }
+
+  listMobileApprovals(): Promise<MobileApprovalsResponse> {
+    return this.get<MobileApprovalsResponse>("/mobile/approvals");
+  }
+
+  resolveMobileApproval(
+    id: string,
+    body: ResolveApprovalRequest,
+  ): Promise<void> {
+    return this.post<void>(`/mobile/approvals/${id}/resolve`, body);
+  }
+
+  listMobileStatus(): Promise<MobileStatusResponse> {
+    return this.get<MobileStatusResponse>("/mobile/status");
+  }
+
+  createMobileCommand(body: CreateCommandRequest): Promise<void> {
+    return this.post<void>("/mobile/commands", body);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Telemetry
+  // ---------------------------------------------------------------------------
+
+  ingestTelemetry(body: IngestTelemetryRequest): Promise<IngestResponse> {
+    return this.post<IngestResponse>("/telemetry/mobile", body);
+  }
+
+  ingestTelemetryError(body: IngestErrorRequest): Promise<IngestResponse> {
+    return this.post<IngestResponse>("/telemetry/mobile/errors", body);
+  }
+
+  telemetryDashboard(
+    queryType: DashboardQueryType,
+    tenantId?: string,
+    startTime?: string,
+    endTime?: string,
+  ): Promise<DashboardResponse> {
+    const params = new URLSearchParams({ query_type: queryType });
+    if (tenantId) params.set("tenant_id", tenantId);
+    if (startTime) params.set("start_time", startTime);
+    if (endTime) params.set("end_time", endTime);
+    return this.get<DashboardResponse>(`/telemetry/mobile/dashboard?${params}`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Rollback Policies
+  // ---------------------------------------------------------------------------
+
+  createRollbackPolicy(body: CreatePolicyRequest): Promise<RollbackPolicy> {
+    return this.post<RollbackPolicy>("/rollback-policies", body);
+  }
+
+  listRollbackPolicies(tenantId?: string): Promise<RollbackPolicy[]> {
+    const params = tenantId
+      ? `?${new URLSearchParams({ tenant_id: tenantId })}`
+      : "";
+    return this.get<RollbackPolicy[]>(`/rollback-policies${params}`);
+  }
+
+  getRollbackPolicy(name: string): Promise<RollbackPolicy> {
+    return this.get<RollbackPolicy>(`/rollback-policies/${name}`);
+  }
+
+  deleteRollbackPolicy(name: string): Promise<void> {
+    return this.del<void>(`/rollback-policies/${name}`);
   }
 
   // ---------------------------------------------------------------------------
