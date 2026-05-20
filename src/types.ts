@@ -142,6 +142,7 @@ export interface WorkerTask {
   instance_id: string;
   block_id: string;
   handler_name: string;
+  queue_name: string | null;
   params: unknown;
   context: unknown;
   attempt: number;

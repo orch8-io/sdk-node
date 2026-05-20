@@ -36,10 +36,19 @@ export const ContextAccessSchema = z.object({
 });
 export type ContextAccess = z.infer<typeof ContextAccessSchema>;
 
+export const HumanChoiceSchema = z.object({
+  label: z.string(),
+  value: z.string(),
+});
+export type HumanChoice = z.infer<typeof HumanChoiceSchema>;
+
 export const HumanInputDefSchema = z.object({
   prompt: z.string().optional(),
   timeout: DurationMsSchema.optional(),
   escalation_handler: z.string().optional(),
+  choices: z.array(HumanChoiceSchema).optional(),
+  store_as: z.string().optional(),
+  allow_comment: z.boolean().optional(),
 });
 export type HumanInputDef = z.infer<typeof HumanInputDefSchema>;
 
