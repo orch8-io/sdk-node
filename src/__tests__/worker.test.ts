@@ -49,6 +49,21 @@ describe("Orch8Worker", () => {
     await stopping;
   }
 
+  it("reports the language-neutral runtime snapshot", () => {
+    const worker = new Orch8Worker({
+      engineUrl: "http://localhost:8080",
+      workerId: "w-1",
+      handlers: { h: vi.fn() },
+      maxConcurrent: 4,
+    });
+    expect(worker.stats()).toEqual({
+      running: false,
+      inFlight: 0,
+      availableSlots: 4,
+      handlers: ["h"],
+    });
+  });
+
   // ---- Circuit breaker check ---------------------------------------------
 
   describe("Circuit breaker check", () => {

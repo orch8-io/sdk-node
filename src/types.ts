@@ -8,6 +8,56 @@ export interface Orch8ClientConfig {
   namespace?: string;
   /** Additional headers to include with every request. */
   headers?: Record<string, string>;
+  /** Resolve short-lived auth headers immediately before every attempt. */
+  getHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
+  /** Safe-request retry policy. Set to false to disable retries. */
+  retry?: RetryConfig | false;
+  /** Per-attempt timeout in milliseconds. Defaults to 30 seconds. */
+  timeoutMs?: number;
+  /** Called immediately before each HTTP attempt. Observer errors are ignored. */
+  onRequest?: (event: RequestEvent) => void;
+  /** Called after every HTTP attempt. Observer errors are ignored. */
+  onResponse?: (event: ResponseEvent) => void;
+}
+
+export interface RetryConfig {
+  /** Total attempts, including the first request. Defaults to 3. */
+  maxAttempts?: number;
+  /** Initial exponential-backoff delay. Defaults to 250 milliseconds. */
+  baseDelayMs?: number;
+  /** Called before each retry. Attempt is one-based (the next attempt). */
+  onRetry?: (error: unknown, attempt: number) => void;
+}
+
+export interface RequestEvent {
+  method: string;
+  path: string;
+  attempt: number;
+  maxAttempts: number;
+}
+
+export interface ResponseEvent extends RequestEvent {
+  durationMs: number;
+  status?: number;
+  error?: unknown;
+}
+
+export interface Page<T> {
+  items: T[];
+  next_cursor: string | null;
+  total?: number;
+}
+
+export interface InstanceStreamOptions {
+  pollMs?: number;
+  lastEventId?: string;
+  signal?: AbortSignal;
+}
+
+export interface InstanceStreamEvent<T = Record<string, unknown>> {
+  id?: string;
+  event?: string;
+  data: T;
 }
 
 export interface SequenceDefinition {
@@ -18,8 +68,18 @@ export interface SequenceDefinition {
   version: number;
   deprecated: boolean;
   blocks: unknown[];
-  interceptors?: unknown[];
+  interceptors?: unknown;
+  input_schema?: unknown;
+  sla?: { max_runtime?: number; max_step_runtime?: number };
+  on_failure?: unknown[];
+  on_cancel?: unknown[];
+  status?: "draft" | "staging" | "production" | "unpublished";
   created_at: string;
+}
+
+export interface CreateSequenceResponse {
+  id: string;
+  warnings?: string[];
 }
 
 export interface TaskInstance {
@@ -156,6 +216,8 @@ export interface WorkerTask {
   error_message: string | null;
   error_retryable: boolean | null;
   created_at: string;
+  resume_checkpoint?: unknown;
+  checkpoint_seq: number;
 }
 
 export interface ClusterNode {
@@ -457,6 +519,8 @@ export interface CreateInstanceRequest {
   session_id?: string;
   parent_instance_id?: string;
   next_fire_at?: string;
+  dry_run?: boolean;
+  dry_run_auto_approve?: boolean;
 }
 
 export interface UpdateStateRequest {
@@ -588,5 +652,11 @@ export interface FailRequest {
 
 export interface HeartbeatRequest {
   worker_id?: string;
+  checkpoint?: unknown;
+  checkpoint_seq?: number;
   [key: string]: unknown;
+}
+
+export interface HeartbeatResponse {
+  checkpoint_seq: number;
 }

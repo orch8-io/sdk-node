@@ -18,6 +18,8 @@ export const DelaySpecSchema = z.object({
   business_days_only: z.boolean().optional(),
   jitter: DurationMsSchema.optional(),
   holidays: z.array(z.string()).optional(),
+  fire_at_local: z.string().optional(),
+  timezone: z.string().optional(),
 });
 export type DelaySpec = z.infer<typeof DelaySpecSchema>;
 
@@ -28,8 +30,15 @@ export const SendWindowSchema = z.object({
 });
 export type SendWindow = z.infer<typeof SendWindowSchema>;
 
+export const FieldAccessSchema = z.union([
+  z.boolean(),
+  z.enum(["all", "none"]),
+  z.object({ fields: z.array(z.string()) }),
+]);
+export type FieldAccess = z.infer<typeof FieldAccessSchema>;
+
 export const ContextAccessSchema = z.object({
-  data: z.boolean().optional(),
+  data: FieldAccessSchema.optional(),
   config: z.boolean().optional(),
   audit: z.boolean().optional(),
   runtime: z.boolean().optional(),
@@ -63,6 +72,8 @@ export const RetryPolicySchema = z.object({
   initial_backoff: DurationMsSchema,
   max_backoff: DurationMsSchema,
   backoff_multiplier: z.number().positive().optional(),
+  retry_if: z.string().min(1).optional(),
+  non_retryable_codes: z.array(z.string().min(1)).optional(),
 });
 export type RetryPolicy = z.infer<typeof RetryPolicySchema>;
 
@@ -81,6 +92,7 @@ export const BlockDefinitionSchema: z.ZodType<BlockDefinition> = z.lazy(() =>
     SubSequenceBlockSchema,
     ABSplitBlockSchema,
     CancellationScopeBlockSchema,
+    SagaBlockSchema,
   ]),
 );
 
@@ -100,6 +112,20 @@ export const StepBlockSchema = z.object({
   queue_name: z.string().optional(),
   deadline: DurationMsSchema.optional(),
   on_deadline_breach: EscalationDefSchema.optional(),
+  fallback_handler: z.string().optional(),
+  cache_key: z.string().optional(),
+  output_schema: z.unknown().optional(),
+  when: z.string().optional(),
+  compensation: z
+    .object({
+      handler: z.string(),
+      params: z.unknown().optional(),
+      depends_on: z.array(z.string()).optional(),
+      verification: z
+        .enum(["handler_result", "provider_receipt", "manual"])
+        .optional(),
+    })
+    .optional(),
 });
 export type StepBlock = z.infer<typeof StepBlockSchema>;
 
@@ -132,6 +158,10 @@ export const LoopBlockSchema = z.object({
   condition: z.string(),
   body: z.array(z.lazy(() => BlockDefinitionSchema)),
   max_iterations: z.number().int().positive().optional(),
+  break_on: z.string().optional(),
+  continue_on_error: z.boolean().optional(),
+  poll_interval: z.number().int().nonnegative().optional(),
+  retain_iterations: z.number().int().nonnegative().optional(),
 });
 export type LoopBlock = {
   type: "loop";
@@ -139,6 +169,10 @@ export type LoopBlock = {
   condition: string;
   body: BlockDefinition[];
   max_iterations?: number;
+  break_on?: string;
+  continue_on_error?: boolean;
+  poll_interval?: number;
+  retain_iterations?: number;
 };
 
 export const ForEachBlockSchema = z.object({
@@ -148,6 +182,7 @@ export const ForEachBlockSchema = z.object({
   item_var: z.string().optional(),
   body: z.array(z.lazy(() => BlockDefinitionSchema)),
   max_iterations: z.number().int().positive().optional(),
+  retain_iterations: z.number().int().nonnegative().optional(),
 });
 export type ForEachBlock = {
   type: "for_each";
@@ -156,6 +191,7 @@ export type ForEachBlock = {
   item_var?: string;
   body: BlockDefinition[];
   max_iterations?: number;
+  retain_iterations?: number;
 };
 
 export const RouteSchema = z.object({
@@ -226,6 +262,24 @@ export type CancellationScopeBlock = {
   blocks: BlockDefinition[];
 };
 
+export const SagaStepSchema: z.ZodType<SagaStep> = z.object({
+  id: z.string(),
+  action: z.lazy(() => BlockDefinitionSchema),
+  compensation: z.lazy(() => BlockDefinitionSchema).optional(),
+});
+export type SagaStep = {
+  id: string;
+  action: BlockDefinition;
+  compensation?: BlockDefinition;
+};
+
+export const SagaBlockSchema = z.object({
+  type: z.literal("saga"),
+  id: z.string(),
+  steps: z.array(SagaStepSchema),
+});
+export type SagaBlock = { type: "saga"; id: string; steps: SagaStep[] };
+
 export type BlockDefinition =
   | StepBlock
   | ParallelBlock
@@ -236,14 +290,18 @@ export type BlockDefinition =
   | TryCatchBlock
   | SubSequenceBlock
   | ABSplitBlock
-  | CancellationScopeBlock;
+  | CancellationScopeBlock
+  | SagaBlock;
 
 // ─── Sequence (top-level) ────────────────────────────────────────────────────
 
-/** Payload shape expected by `POST /sequences`. */
+/** Authoring shape accepted by Orch8Client, which supplies wire identity fields. */
 export const SequenceCreateSchema = z.object({
   name: z.string().min(1),
   namespace: z.string().optional(),
   blocks: z.array(BlockDefinitionSchema),
+  input_schema: z.unknown().optional(),
+  on_failure: z.array(BlockDefinitionSchema).optional(),
+  on_cancel: z.array(BlockDefinitionSchema).optional(),
 });
 export type SequenceCreate = z.infer<typeof SequenceCreateSchema>;

@@ -26,6 +26,8 @@ import {
   type Route,
   type RouterBlock,
   type SendWindow,
+  type SagaBlock,
+  type SagaStep,
   SequenceCreateSchema,
   type StepBlock,
   type SubSequenceBlock,
@@ -45,6 +47,16 @@ export interface StepOptions {
   /** SLA deadline in milliseconds from step start. */
   deadline?: number;
   on_deadline_breach?: EscalationDef;
+  fallback_handler?: string;
+  cache_key?: string;
+  output_schema?: unknown;
+  when?: string;
+  compensation?: {
+    handler: string;
+    params?: unknown;
+    depends_on?: string[];
+    verification?: "handler_result" | "provider_receipt" | "manual";
+  };
 }
 
 /**
@@ -118,14 +130,21 @@ export class WorkflowBuilder {
     id: string,
     condition: string,
     body: (b: WorkflowBuilder) => void,
-    max_iterations?: number,
+    options?: number | {
+      max_iterations?: number;
+      break_on?: string;
+      continue_on_error?: boolean;
+      poll_interval?: number;
+      retain_iterations?: number;
+    },
   ): this {
+    const opts = typeof options === "number" ? { max_iterations: options } : (options ?? {});
     const block: LoopBlock = {
       type: "loop",
       id,
       condition,
       body: collectBranch(body, this.namespace),
-      max_iterations,
+      ...opts,
     };
     this.blocks.push(block);
     return this;
@@ -136,7 +155,7 @@ export class WorkflowBuilder {
     id: string,
     collection: string,
     body: (b: WorkflowBuilder) => void,
-    opts: { item_var?: string; max_iterations?: number } = {},
+    opts: { item_var?: string; max_iterations?: number; retain_iterations?: number } = {},
   ): this {
     const block: ForEachBlock = {
       type: "for_each",
@@ -145,6 +164,7 @@ export class WorkflowBuilder {
       item_var: opts.item_var,
       body: collectBranch(body, this.namespace),
       max_iterations: opts.max_iterations,
+      retain_iterations: opts.retain_iterations,
     };
     this.blocks.push(block);
     return this;
@@ -211,6 +231,37 @@ export class WorkflowBuilder {
       id,
       blocks: collectBranch(body, this.namespace),
     });
+    return this;
+  }
+
+  /** Append a Saga block with sequential actions and optional compensations. */
+  saga(
+    id: string,
+    steps: Array<{
+      id: string;
+      action: (b: WorkflowBuilder) => void;
+      compensation?: (b: WorkflowBuilder) => void;
+    }>,
+  ): this {
+    const resolved: SagaStep[] = steps.map((step) => {
+      const actions = collectBranch(step.action, this.namespace);
+      if (actions.length !== 1) {
+        throw new Error(`Saga step ${step.id} must define exactly one action block`);
+      }
+      const compensations = step.compensation
+        ? collectBranch(step.compensation, this.namespace)
+        : [];
+      if (compensations.length > 1) {
+        throw new Error(`Saga step ${step.id} must define at most one compensation block`);
+      }
+      return {
+        id: step.id,
+        action: actions[0],
+        compensation: compensations[0],
+      };
+    });
+    const block: SagaBlock = { type: "saga", id, steps: resolved };
+    this.blocks.push(block);
     return this;
   }
 

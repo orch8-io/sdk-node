@@ -3,6 +3,13 @@ import type { Orch8Client } from "./client.js";
 
 export type HandlerFn = (task: WorkerTask) => Promise<unknown>;
 
+export interface WorkerRuntimeStats {
+  running: boolean;
+  inFlight: number;
+  availableSlots: number;
+  handlers: string[];
+}
+
 export interface WorkerConfig {
   /** Base URL of the Orch8 engine API (e.g. "http://localhost:8080"). */
   engineUrl?: string;
@@ -135,6 +142,15 @@ export class Orch8Worker {
     await Promise.race([drain, timeout]);
   }
 
+  stats(): WorkerRuntimeStats {
+    return {
+      running: this.running,
+      inFlight: this.inFlightTasks.size,
+      availableSlots: this.concurrencySemaphore,
+      handlers: Object.keys(this.config.handlers),
+    };
+  }
+
   private async poll(handlerName: string): Promise<void> {
     if (!this.running || this.concurrencySemaphore <= 0) return;
 
@@ -214,13 +230,15 @@ export class Orch8Worker {
     const handler = this.config.handlers[task.handler_name];
     if (!handler) {
       await this.failTask(task.id, `no handler registered for "${task.handler_name}"`, false);
+      this.inFlightTasks.delete(task.id);
+      this.concurrencySemaphore++;
       return;
     }
 
     try {
       const output = await this.withTimeout(handler(task), task.timeout_ms);
       await this.completeTask(task.id, output);
-      this.config.onTaskComplete?.(task, output);
+      this.notify(() => this.config.onTaskComplete?.(task, output));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // If the error exposes a retryable flag, respect it. Otherwise default
@@ -230,10 +248,18 @@ export class Orch8Worker {
           ? Boolean((err as Error & { retryable: unknown }).retryable)
           : false;
       await this.failTask(task.id, message, retryable);
-      this.config.onTaskFail?.(task, message);
+      this.notify(() => this.config.onTaskFail?.(task, message));
     } finally {
       this.inFlightTasks.delete(task.id);
       this.concurrencySemaphore++;
+    }
+  }
+
+  private notify(callback: () => void): void {
+    try {
+      callback();
+    } catch {
+      // Lifecycle observers must not alter task acknowledgement semantics.
     }
   }
 

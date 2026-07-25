@@ -1,6 +1,13 @@
 import type {
   Orch8ClientConfig,
+  RetryConfig,
+  RequestEvent,
+  ResponseEvent,
+  Page,
+  InstanceStreamOptions,
+  InstanceStreamEvent,
   SequenceDefinition,
+  CreateSequenceResponse,
   TaskInstance,
   StepOutput,
   ExecutionNode,
@@ -57,7 +64,11 @@ import type {
   CompleteRequest,
   FailRequest,
   HeartbeatRequest,
+  HeartbeatResponse,
 } from "./types.js";
+import { ContinuityClient } from "./continuity.js";
+
+export type HttpMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export class Orch8Error extends Error {
   constructor(
@@ -75,23 +86,40 @@ export class Orch8Client {
   private readonly tenantId?: string;
   private readonly namespace?: string;
   private readonly extraHeaders: Record<string, string>;
+  private readonly getHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
+  private readonly retryConfig: RetryConfig | false;
+  private readonly timeoutMs: number;
+  private readonly onRequest?: (event: RequestEvent) => void;
+  private readonly onResponse?: (event: ResponseEvent) => void;
+  /** Portable-continuity, policy, simulation, and federation operations. */
+  public readonly continuity: ContinuityClient;
 
   constructor(config: Orch8ClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
     this.tenantId = config.tenantId;
     this.namespace = config.namespace;
     this.extraHeaders = config.headers ?? {};
+    this.getHeaders = config.getHeaders;
+    this.retryConfig = config.retry === false
+      ? false
+      : { maxAttempts: 3, baseDelayMs: 250, ...(config.retry ?? {}) };
+    this.timeoutMs = config.timeoutMs ?? 30_000;
+    this.onRequest = config.onRequest;
+    this.onResponse = config.onResponse;
+    this.continuity = new ContinuityClient(this);
   }
 
   // ---------------------------------------------------------------------------
   // Internal HTTP helpers
   // ---------------------------------------------------------------------------
 
-  private buildHeaders(extra?: Record<string, string>): Record<string, string> {
+  private async buildHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
+    const dynamicHeaders = this.getHeaders ? await this.getHeaders() : {};
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json",
       ...this.extraHeaders,
+      ...dynamicHeaders,
       ...extra,
     };
     if (this.tenantId) {
@@ -100,40 +128,127 @@ export class Orch8Client {
     return headers;
   }
 
-  private async request<T>(
-    method: string,
+  private e(segment: string): string {
+    return encodeURIComponent(segment);
+  }
+
+  async request<T = unknown>(
+    method: HttpMethod,
     path: string,
     body?: unknown,
   ): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers: this.buildHeaders(),
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    if (!path.startsWith("/") || path.startsWith("//")) {
+      throw new TypeError("Orch8 request paths must start with exactly one '/'");
+    }
+    const normalizedMethod = method.toUpperCase() as HttpMethod;
+    const isSafe = normalizedMethod === "GET";
+    const maxAttempts = this.retryConfig && isSafe
+      ? Math.max(1, this.retryConfig.maxAttempts ?? 3)
+      : 1;
+    const baseDelayMs = this.retryConfig ? this.retryConfig.baseDelayMs ?? 250 : 0;
+    let lastError: unknown;
 
-    if (!res.ok) {
-      let resBody: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const event = { method: normalizedMethod, path, attempt, maxAttempts };
+      const startedAt = Date.now();
+      this.observe(this.onRequest, event);
       try {
-        resBody = await res.json();
-      } catch {
-        resBody = await res.text().catch(() => null);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+        try {
+          const res = await fetch(`${this.baseUrl}${path}`, {
+            method: normalizedMethod,
+            headers: await this.buildHeaders(),
+            body: body !== undefined ? JSON.stringify(body) : undefined,
+            signal: controller.signal,
+          });
+
+          const text = res.status === 204 ? "" : await res.text();
+          const responseBody = text.length === 0 ? undefined : this.parseBody(text);
+          if (!res.ok) {
+            const error = new Orch8Error(res.status, responseBody, path);
+            this.observe(this.onResponse, {
+              ...event,
+              status: res.status,
+              durationMs: Date.now() - startedAt,
+              error,
+            });
+            if (this.isRetryableStatus(res.status) && attempt < maxAttempts) {
+              clearTimeout(timeout);
+              await this.retry(error, attempt, baseDelayMs);
+              continue;
+            }
+            throw error;
+          }
+          this.observe(this.onResponse, {
+            ...event,
+            status: res.status,
+            durationMs: Date.now() - startedAt,
+          });
+          if (text.length === 0) return undefined as T;
+          return JSON.parse(text) as T;
+        } finally {
+          clearTimeout(timeout);
+        }
+      } catch (error) {
+        lastError = error;
+        if (!(error instanceof Orch8Error)) {
+          this.observe(this.onResponse, {
+            ...event,
+            durationMs: Date.now() - startedAt,
+            error,
+          });
+        }
+        if (error instanceof Orch8Error || attempt >= maxAttempts) throw error;
+        await this.retry(error, attempt, baseDelayMs);
       }
-      throw new Orch8Error(res.status, resBody, path);
     }
+    throw lastError;
+  }
 
-    if (res.status === 204) {
-      return undefined as T;
+  private observe<T>(observer: ((event: T) => void) | undefined, event: T): void {
+    try {
+      observer?.(event);
+    } catch {
+      // Observability must never change request behavior.
     }
+  }
 
-    // The engine returns 200 with an empty body on several handlers
-    // (update_state, update_context, deprecate_sequence, drain_node, etc.).
-    // `res.json()` would throw on an empty body; fall back to a text read
-    // and return undefined when nothing came back.
-    const text = await res.text();
-    if (text.length === 0) {
-      return undefined as T;
+  async requestPage<T>(
+    path: string,
+    query?: Record<string, string>,
+  ): Promise<Page<T>> {
+    const separator = path.includes("?") ? "&" : "?";
+    const suffix = query && Object.keys(query).length > 0
+      ? `${separator}${new URLSearchParams(query)}`
+      : "";
+    const result = await this.request<T[] | Partial<Page<T>>>("GET", `${path}${suffix}`);
+    if (Array.isArray(result)) return { items: result, next_cursor: null };
+    return {
+      items: result.items ?? [],
+      next_cursor: result.next_cursor ?? null,
+      ...(result.total === undefined ? {} : { total: result.total }),
+    };
+  }
+
+  private parseBody(text: string): unknown {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
     }
-    return JSON.parse(text) as T;
+  }
+
+  private isRetryableStatus(status: number): boolean {
+    return status === 408 || status === 425 || status === 429 || status >= 500;
+  }
+
+  private async retry(error: unknown, attempt: number, baseDelayMs: number): Promise<void> {
+    if (this.retryConfig && this.retryConfig.onRetry) {
+      this.retryConfig.onRetry(error, attempt + 1);
+    }
+    const delayMs = baseDelayMs * 2 ** (attempt - 1);
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 
   private get<T>(path: string): Promise<T> {
@@ -162,12 +277,26 @@ export class Orch8Client {
 
   createSequence(
     body: Record<string, unknown>,
-  ): Promise<SequenceDefinition> {
-    return this.post<SequenceDefinition>("/sequences", body);
+  ): Promise<CreateSequenceResponse> {
+    const tenantId = body.tenant_id ?? this.tenantId;
+    if (typeof tenantId !== "string" || tenantId.length === 0) {
+      return Promise.reject(new TypeError("tenant_id is required to create a sequence"));
+    }
+    const prepared = {
+      ...body,
+      id: body.id ?? globalThis.crypto.randomUUID(),
+      tenant_id: tenantId,
+      namespace: body.namespace ?? this.namespace ?? "default",
+      version: body.version ?? 1,
+      deprecated: body.deprecated ?? false,
+      status: body.status ?? "production",
+      created_at: body.created_at ?? new Date().toISOString(),
+    };
+    return this.post<CreateSequenceResponse>("/sequences", prepared);
   }
 
   getSequence(id: string): Promise<SequenceDefinition> {
-    return this.get<SequenceDefinition>(`/sequences/${id}`);
+    return this.get<SequenceDefinition>(`/sequences/${this.e(id)}`);
   }
 
   getSequenceByName(
@@ -182,7 +311,7 @@ export class Orch8Client {
   }
 
   deprecateSequence(id: string): Promise<void> {
-    return this.post<void>(`/sequences/${id}/deprecate`);
+    return this.post<void>(`/sequences/${this.e(id)}/deprecate`);
   }
 
   listSequenceVersions(
@@ -194,13 +323,16 @@ export class Orch8Client {
     return this.get<SequenceDefinition[]>(`/sequences/versions?${params}`);
   }
 
-  listSequences(filter?: Record<string, string>): Promise<SequenceDefinition[]> {
+  async listSequences(filter?: Record<string, string>): Promise<SequenceDefinition[]> {
     const params = filter ? `?${new URLSearchParams(filter)}` : "";
-    return this.get<SequenceDefinition[]>(`/sequences${params}`);
+    const result = await this.get<SequenceDefinition[] | { items: SequenceDefinition[] }>(
+      `/sequences${params}`,
+    );
+    return Array.isArray(result) ? result : result.items;
   }
 
   deleteSequence(id: string): Promise<void> {
-    return this.del<void>(`/sequences/${id}`);
+    return this.del<void>(`/sequences/${this.e(id)}`);
   }
 
   migrateInstance(body: Record<string, unknown>): Promise<TaskInstance> {
@@ -211,27 +343,45 @@ export class Orch8Client {
   // Instances
   // ---------------------------------------------------------------------------
 
-  createInstance(
+  async createInstance(
     body: CreateInstanceRequest | Record<string, unknown>,
   ): Promise<TaskInstance> {
-    return this.post<TaskInstance>("/instances", body);
+    return this.post<TaskInstance>("/instances", this.prepareInstance(body));
   }
 
-  batchCreateInstances(
+  async batchCreateInstances(
     instances: Record<string, unknown>[],
   ): Promise<BatchCreateResponse> {
     // Engine contract: `{"instances": [...]}` — see
     // orch8-api::instances::BatchCreateRequest.
-    return this.post<BatchCreateResponse>("/instances/batch", { instances });
+    const prepared = instances.map((instance) => this.prepareInstance(instance));
+    return this.post<BatchCreateResponse>("/instances/batch", { instances: prepared });
   }
 
   getInstance(id: string): Promise<TaskInstance> {
-    return this.get<TaskInstance>(`/instances/${id}`);
+    return this.get<TaskInstance>(`/instances/${this.e(id)}`);
   }
 
-  listInstances(filter?: Record<string, string>): Promise<TaskInstance[]> {
+  async listInstances(filter?: Record<string, string>): Promise<TaskInstance[]> {
     const params = filter ? `?${new URLSearchParams(filter)}` : "";
-    return this.get<TaskInstance[]>(`/instances${params}`);
+    const result = await this.get<TaskInstance[] | { items: TaskInstance[] }>(
+      `/instances${params}`,
+    );
+    return Array.isArray(result) ? result : result.items;
+  }
+
+  private prepareInstance(
+    body: CreateInstanceRequest | Record<string, unknown>,
+  ): Record<string, unknown> {
+    const tenantId = body.tenant_id ?? this.tenantId;
+    if (typeof tenantId !== "string" || tenantId.length === 0) {
+      throw new TypeError("tenant_id is required to create an instance");
+    }
+    return {
+      ...body,
+      tenant_id: tenantId,
+      namespace: body.namespace ?? this.namespace ?? "default",
+    };
   }
 
   // Engine returns 200 with an empty body — no TaskInstance is sent back.
@@ -240,7 +390,7 @@ export class Orch8Client {
     id: string,
     body: UpdateStateRequest | Record<string, unknown>,
   ): Promise<void> {
-    return this.patch<void>(`/instances/${id}/state`, body);
+    return this.patch<void>(`/instances/${this.e(id)}/state`, body);
   }
 
   // Engine returns 200 with an empty body.
@@ -248,7 +398,7 @@ export class Orch8Client {
     id: string,
     body: UpdateContextRequest | Record<string, unknown>,
   ): Promise<void> {
-    return this.patch<void>(`/instances/${id}/context`, body);
+    return this.patch<void>(`/instances/${this.e(id)}/context`, body);
   }
 
   // Engine returns 201 with `{"signal_id": <uuid>}` — preserve it so callers
@@ -257,57 +407,77 @@ export class Orch8Client {
     id: string,
     body: SendSignalRequest | Record<string, unknown>,
   ): Promise<{ signal_id: string }> {
-    return this.post<{ signal_id: string }>(`/instances/${id}/signals`, body);
+    return this.post<{ signal_id: string }>(`/instances/${this.e(id)}/signals`, body);
   }
 
   getOutputs(id: string): Promise<StepOutput[]> {
-    return this.get<StepOutput[]>(`/instances/${id}/outputs`);
+    return this.get<StepOutput[]>(`/instances/${this.e(id)}/outputs`);
   }
 
   getExecutionTree(id: string): Promise<ExecutionNode[]> {
-    return this.get<ExecutionNode[]>(`/instances/${id}/tree`);
+    return this.get<ExecutionNode[]>(`/instances/${this.e(id)}/tree`);
   }
 
   retryInstance(id: string): Promise<TaskInstance> {
-    return this.post<TaskInstance>(`/instances/${id}/retry`);
+    return this.post<TaskInstance>(`/instances/${this.e(id)}/retry`);
   }
 
   listCheckpoints(id: string): Promise<Checkpoint[]> {
-    return this.get<Checkpoint[]>(`/instances/${id}/checkpoints`);
+    return this.get<Checkpoint[]>(`/instances/${this.e(id)}/checkpoints`);
   }
 
   saveCheckpoint(
     id: string,
     body: Record<string, unknown>,
   ): Promise<Checkpoint> {
-    return this.post<Checkpoint>(`/instances/${id}/checkpoints`, body);
+    return this.post<Checkpoint>(`/instances/${this.e(id)}/checkpoints`, body);
   }
 
   getLatestCheckpoint(id: string): Promise<Checkpoint> {
-    return this.get<Checkpoint>(`/instances/${id}/checkpoints/latest`);
+    return this.get<Checkpoint>(`/instances/${this.e(id)}/checkpoints/latest`);
   }
 
   pruneCheckpoints(
     id: string,
     body?: Record<string, unknown>,
   ): Promise<void> {
-    return this.post<void>(`/instances/${id}/checkpoints/prune`, body);
+    return this.post<void>(`/instances/${this.e(id)}/checkpoints/prune`, body);
   }
 
   listAuditLog(id: string): Promise<AuditEntry[]> {
-    return this.get<AuditEntry[]>(`/instances/${id}/audit`);
+    return this.get<AuditEntry[]>(`/instances/${this.e(id)}/audit`);
   }
 
   injectBlocks(id: string, body: Record<string, unknown>): Promise<void> {
-    return this.post<void>(`/instances/${id}/inject-blocks`, body);
+    return this.post<void>(`/instances/${this.e(id)}/inject-blocks`, body);
   }
 
   async *streamInstance(
     id: string,
+    options?: InstanceStreamOptions,
   ): AsyncGenerator<Record<string, unknown>> {
-    const res = await fetch(`${this.baseUrl}/instances/${id}/stream`, {
+    for await (const event of this.streamInstanceEvents(id, options)) {
+      yield event.data;
+    }
+  }
+
+  async *streamInstanceEvents(
+    id: string,
+    options: InstanceStreamOptions = {},
+  ): AsyncGenerator<InstanceStreamEvent> {
+    const pollMs = options.pollMs === undefined
+      ? undefined
+      : Math.max(100, Math.min(options.pollMs, 5000));
+    const query = pollMs === undefined ? "" : `?${new URLSearchParams({ poll_ms: String(pollMs) })}`;
+    const path = `/instances/${this.e(id)}/stream${query}`;
+    const headers = await this.buildHeaders({
+      Accept: "text/event-stream",
+      ...(options.lastEventId ? { "Last-Event-ID": options.lastEventId } : {}),
+    });
+    const res = await fetch(`${this.baseUrl}${path}`, {
       method: "GET",
-      headers: this.buildHeaders({ Accept: "text/event-stream" }),
+      headers,
+      signal: options.signal,
     });
 
     if (!res.ok) {
@@ -317,7 +487,7 @@ export class Orch8Client {
       } catch {
         resBody = await res.text().catch(() => null);
       }
-      throw new Orch8Error(res.status, resBody, `/instances/${id}/stream`);
+      throw new Orch8Error(res.status, resBody, path);
     }
 
     const reader = res.body?.getReader();
@@ -325,6 +495,24 @@ export class Orch8Client {
 
     const decoder = new TextDecoder();
     let buffer = "";
+    let eventId: string | undefined;
+    let eventType: string | undefined;
+    let eventData: string[] = [];
+
+    const parseEvent = (): InstanceStreamEvent | undefined => {
+      if (eventData.length === 0) return undefined;
+      const raw = eventData.join("\n");
+      eventData = [];
+      if (!raw || raw === "[DONE]") return undefined;
+      try {
+        const event = { id: eventId, event: eventType, data: JSON.parse(raw) as Record<string, unknown> };
+        eventId = undefined;
+        eventType = undefined;
+        return event;
+      } catch {
+        return undefined;
+      }
+    };
 
     try {
       while (true) {
@@ -336,19 +524,17 @@ export class Orch8Client {
         buffer = lines.pop() ?? "";
 
         for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed.startsWith("data:")) {
-            const data = trimmed.slice(5).trim();
-            if (data && data !== "[DONE]") {
-              try {
-                yield JSON.parse(data) as Record<string, unknown>;
-              } catch {
-                // Skip non-JSON data lines.
-              }
-            }
+          if (line.startsWith("id:")) eventId = line.slice(3).trim();
+          else if (line.startsWith("event:")) eventType = line.slice(6).trim();
+          else if (line.startsWith("data:")) eventData.push(line.slice(5).trimStart());
+          else if (line.trim() === "") {
+            const event = parseEvent();
+            if (event) yield event;
           }
         }
       }
+      const event = parseEvent();
+      if (event) yield event;
     } finally {
       reader.releaseLock();
     }
@@ -396,18 +582,18 @@ export class Orch8Client {
   }
 
   getCron(id: string): Promise<CronSchedule> {
-    return this.get<CronSchedule>(`/cron/${id}`);
+    return this.get<CronSchedule>(`/cron/${this.e(id)}`);
   }
 
   updateCron(
     id: string,
     body: UpdateCronRequest | Record<string, unknown>,
   ): Promise<CronSchedule> {
-    return this.put<CronSchedule>(`/cron/${id}`, body);
+    return this.put<CronSchedule>(`/cron/${this.e(id)}`, body);
   }
 
   deleteCron(id: string): Promise<void> {
-    return this.del<void>(`/cron/${id}`);
+    return this.del<void>(`/cron/${this.e(id)}`);
   }
 
   // ---------------------------------------------------------------------------
@@ -428,18 +614,18 @@ export class Orch8Client {
   }
 
   getTrigger(slug: string): Promise<TriggerDef> {
-    return this.get<TriggerDef>(`/triggers/${slug}`);
+    return this.get<TriggerDef>(`/triggers/${this.e(slug)}`);
   }
 
   deleteTrigger(slug: string): Promise<void> {
-    return this.del<void>(`/triggers/${slug}`);
+    return this.del<void>(`/triggers/${this.e(slug)}`);
   }
 
   fireTrigger(
     slug: string,
     body?: Record<string, unknown>,
   ): Promise<FireTriggerResponse> {
-    return this.post<FireTriggerResponse>(`/triggers/${slug}/fire`, body);
+    return this.post<FireTriggerResponse>(`/triggers/${this.e(slug)}/fire`, body);
   }
 
   // ---------------------------------------------------------------------------
@@ -458,18 +644,18 @@ export class Orch8Client {
   }
 
   getPlugin(name: string): Promise<PluginDef> {
-    return this.get<PluginDef>(`/plugins/${name}`);
+    return this.get<PluginDef>(`/plugins/${this.e(name)}`);
   }
 
   updatePlugin(
     name: string,
     body: Record<string, unknown>,
   ): Promise<PluginDef> {
-    return this.patch<PluginDef>(`/plugins/${name}`, body);
+    return this.patch<PluginDef>(`/plugins/${this.e(name)}`, body);
   }
 
   deletePlugin(name: string): Promise<void> {
-    return this.del<void>(`/plugins/${name}`);
+    return this.del<void>(`/plugins/${this.e(name)}`);
   }
 
   // ---------------------------------------------------------------------------
@@ -483,29 +669,29 @@ export class Orch8Client {
   }
 
   getSession(id: string): Promise<Session> {
-    return this.get<Session>(`/sessions/${id}`);
+    return this.get<Session>(`/sessions/${this.e(id)}`);
   }
 
   getSessionByKey(tenantId: string, key: string): Promise<Session> {
-    return this.get<Session>(`/sessions/by-key/${tenantId}/${key}`);
+    return this.get<Session>(`/sessions/by-key/${this.e(tenantId)}/${this.e(key)}`);
   }
 
   updateSessionData(
     id: string,
     body: Record<string, unknown>,
   ): Promise<Session> {
-    return this.patch<Session>(`/sessions/${id}/data`, body);
+    return this.patch<Session>(`/sessions/${this.e(id)}/data`, body);
   }
 
   updateSessionState(
     id: string,
     body: Record<string, unknown>,
   ): Promise<Session> {
-    return this.patch<Session>(`/sessions/${id}/state`, body);
+    return this.patch<Session>(`/sessions/${this.e(id)}/state`, body);
   }
 
   listSessionInstances(id: string): Promise<TaskInstance[]> {
-    return this.get<TaskInstance[]>(`/sessions/${id}/instances`);
+    return this.get<TaskInstance[]>(`/sessions/${this.e(id)}/instances`);
   }
 
   // ---------------------------------------------------------------------------
@@ -522,21 +708,24 @@ export class Orch8Client {
     id: string,
     body: CompleteRequest | Record<string, unknown>,
   ): Promise<void> {
-    return this.post<void>(`/workers/tasks/${id}/complete`, body);
+    return this.post<void>(`/workers/tasks/${this.e(id)}/complete`, body);
   }
 
   failTask(
     id: string,
     body: FailRequest | Record<string, unknown>,
   ): Promise<void> {
-    return this.post<void>(`/workers/tasks/${id}/fail`, body);
+    return this.post<void>(`/workers/tasks/${this.e(id)}/fail`, body);
   }
 
   heartbeatTask(
     id: string,
     body: HeartbeatRequest | Record<string, unknown>,
-  ): Promise<void> {
-    return this.post<void>(`/workers/tasks/${id}/heartbeat`, body);
+  ): Promise<HeartbeatResponse> {
+    if ("checkpoint" in body && body.checkpoint !== undefined && body.checkpoint_seq === undefined) {
+      return Promise.reject(new TypeError("checkpoint_seq is required with checkpoint"));
+    }
+    return this.post<HeartbeatResponse>(`/workers/tasks/${this.e(id)}/heartbeat`, body);
   }
 
   listWorkerTasks(filter?: Record<string, string>): Promise<WorkerTask[]> {
@@ -563,7 +752,7 @@ export class Orch8Client {
   }
 
   drainNode(id: string): Promise<void> {
-    return this.post<void>(`/cluster/nodes/${id}/drain`);
+    return this.post<void>(`/cluster/nodes/${this.e(id)}/drain`);
   }
 
   // ---------------------------------------------------------------------------
@@ -575,11 +764,11 @@ export class Orch8Client {
   }
 
   getCircuitBreaker(handler: string): Promise<CircuitBreaker> {
-    return this.get<CircuitBreaker>(`/circuit-breakers/${handler}`);
+    return this.get<CircuitBreaker>(`/circuit-breakers/${this.e(handler)}`);
   }
 
   resetCircuitBreaker(handler: string): Promise<void> {
-    return this.post<void>(`/circuit-breakers/${handler}/reset`);
+    return this.post<void>(`/circuit-breakers/${this.e(handler)}/reset`);
   }
 
   // ---------------------------------------------------------------------------
@@ -587,7 +776,7 @@ export class Orch8Client {
   // ---------------------------------------------------------------------------
 
   listTenantCircuitBreakers(tenantId: string): Promise<CircuitBreaker[]> {
-    return this.get<CircuitBreaker[]>(`/tenants/${tenantId}/circuit-breakers`);
+    return this.get<CircuitBreaker[]>(`/tenants/${this.e(tenantId)}/circuit-breakers`);
   }
 
   getTenantCircuitBreaker(
@@ -595,7 +784,7 @@ export class Orch8Client {
     handler: string,
   ): Promise<CircuitBreaker> {
     return this.get<CircuitBreaker>(
-      `/tenants/${tenantId}/circuit-breakers/${handler}`,
+      `/tenants/${this.e(tenantId)}/circuit-breakers/${this.e(handler)}`,
     );
   }
 
@@ -604,7 +793,7 @@ export class Orch8Client {
     handler: string,
   ): Promise<void> {
     return this.post<void>(
-      `/tenants/${tenantId}/circuit-breakers/${handler}/reset`,
+      `/tenants/${this.e(tenantId)}/circuit-breakers/${this.e(handler)}/reset`,
     );
   }
 
@@ -626,22 +815,22 @@ export class Orch8Client {
   }
 
   getPool(id: string): Promise<ResourcePool> {
-    return this.get<ResourcePool>(`/pools/${id}`);
+    return this.get<ResourcePool>(`/pools/${this.e(id)}`);
   }
 
   deletePool(id: string): Promise<void> {
-    return this.del<void>(`/pools/${id}`);
+    return this.del<void>(`/pools/${this.e(id)}`);
   }
 
   listPoolResources(poolId: string): Promise<PoolResource[]> {
-    return this.get<PoolResource[]>(`/pools/${poolId}/resources`);
+    return this.get<PoolResource[]>(`/pools/${this.e(poolId)}/resources`);
   }
 
   createPoolResource(
     poolId: string,
     body: AddResourceRequest | Record<string, unknown>,
   ): Promise<PoolResource> {
-    return this.post<PoolResource>(`/pools/${poolId}/resources`, body);
+    return this.post<PoolResource>(`/pools/${this.e(poolId)}/resources`, body);
   }
 
   updatePoolResource(
@@ -650,13 +839,13 @@ export class Orch8Client {
     body: UpdateResourceRequest | Record<string, unknown>,
   ): Promise<PoolResource> {
     return this.put<PoolResource>(
-      `/pools/${poolId}/resources/${resourceId}`,
+      `/pools/${this.e(poolId)}/resources/${this.e(resourceId)}`,
       body,
     );
   }
 
   deletePoolResource(poolId: string, resourceId: string): Promise<void> {
-    return this.del<void>(`/pools/${poolId}/resources/${resourceId}`);
+    return this.del<void>(`/pools/${this.e(poolId)}/resources/${this.e(resourceId)}`);
   }
 
   // ---------------------------------------------------------------------------
@@ -677,18 +866,18 @@ export class Orch8Client {
   }
 
   getCredential(id: string): Promise<Credential> {
-    return this.get<Credential>(`/credentials/${id}`);
+    return this.get<Credential>(`/credentials/${this.e(id)}`);
   }
 
   deleteCredential(id: string): Promise<void> {
-    return this.del<void>(`/credentials/${id}`);
+    return this.del<void>(`/credentials/${this.e(id)}`);
   }
 
   updateCredential(
     id: string,
     body: UpdateCredentialRequest | Record<string, unknown>,
   ): Promise<Credential> {
-    return this.patch<Credential>(`/credentials/${id}`, body);
+    return this.patch<Credential>(`/credentials/${this.e(id)}`, body);
   }
 
   // ---------------------------------------------------------------------------
@@ -715,7 +904,7 @@ export class Orch8Client {
     id: string,
     body: ResolveApprovalRequest,
   ): Promise<void> {
-    return this.post<void>(`/mobile/approvals/${id}/resolve`, body);
+    return this.post<void>(`/mobile/approvals/${this.e(id)}/resolve`, body);
   }
 
   listMobileStatus(): Promise<MobileStatusResponse> {
@@ -767,11 +956,11 @@ export class Orch8Client {
   }
 
   getRollbackPolicy(name: string): Promise<RollbackPolicy> {
-    return this.get<RollbackPolicy>(`/rollback-policies/${name}`);
+    return this.get<RollbackPolicy>(`/rollback-policies/${this.e(name)}`);
   }
 
   deleteRollbackPolicy(name: string): Promise<void> {
-    return this.del<void>(`/rollback-policies/${name}`);
+    return this.del<void>(`/rollback-policies/${this.e(name)}`);
   }
 
   // ---------------------------------------------------------------------------

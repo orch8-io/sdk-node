@@ -91,6 +91,95 @@ describe("Orch8Client", () => {
       const [, init] = mockFetch.mock.calls[0];
       expect(init.headers["Authorization"]).toBe("Bearer my-key");
     });
+
+    it("refreshes dynamic headers before each retry", async () => {
+      const getHeaders = vi.fn()
+        .mockResolvedValueOnce({ Authorization: "Bearer old" })
+        .mockResolvedValueOnce({ Authorization: "Bearer fresh" });
+      const authed = new Orch8Client({
+        baseUrl: "http://localhost:8080",
+        getHeaders,
+        retry: { baseDelayMs: 0 },
+      });
+      mockFetch
+        .mockResolvedValueOnce(errorResponse(503))
+        .mockResolvedValueOnce(jsonResponse({ id: "seq-1" }));
+
+      await authed.getSequence("seq-1");
+
+      expect(getHeaders).toHaveBeenCalledTimes(2);
+      expect(mockFetch.mock.calls[1][1].headers.Authorization).toBe("Bearer fresh");
+    });
+  });
+
+  describe("Resilient transport", () => {
+    it("retries safe requests on transient responses", async () => {
+      const onRetry = vi.fn();
+      const resilient = new Orch8Client({
+        baseUrl: "http://localhost:8080",
+        retry: { maxAttempts: 3, baseDelayMs: 0, onRetry },
+      });
+      mockFetch
+        .mockResolvedValueOnce(errorResponse(429, { error: "slow down" }))
+        .mockResolvedValueOnce(errorResponse(503, { error: "busy" }))
+        .mockResolvedValueOnce(jsonResponse({ id: "seq-1" }));
+
+      await expect(resilient.getSequence("seq-1")).resolves.toEqual({ id: "seq-1" });
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(onRetry).toHaveBeenCalledTimes(2);
+      expect(onRetry.mock.calls[0][1]).toBe(2);
+    });
+
+    it("never retries unsafe requests", async () => {
+      const resilient = new Orch8Client({
+        baseUrl: "http://localhost:8080",
+        tenantId: "tenant-1",
+        retry: { maxAttempts: 3, baseDelayMs: 0 },
+      });
+      mockFetch.mockResolvedValue(errorResponse(503));
+
+      await expect(resilient.createInstance({ sequence_id: "seq-1" })).rejects.toThrow(Orch8Error);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("can disable retries", async () => {
+      const direct = new Orch8Client({ baseUrl: "http://localhost:8080", retry: false });
+      mockFetch.mockResolvedValue(errorResponse(503));
+      await expect(direct.getSequence("seq-1")).rejects.toThrow(Orch8Error);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("emits one observation per attempt without letting observers fail requests", async () => {
+      const responses: Array<{ status?: number; attempt: number }> = [];
+      const observed = new Orch8Client({
+        baseUrl: "http://localhost:8080",
+        retry: { baseDelayMs: 0 },
+        onRequest: () => { throw new Error("observer failure"); },
+        onResponse: (event) => responses.push(event),
+      });
+      mockFetch
+        .mockResolvedValueOnce(errorResponse(503))
+        .mockResolvedValueOnce(jsonResponse({ id: "seq-1" }));
+
+      await observed.getSequence("seq-1");
+      expect(responses.map(({ status, attempt }) => ({ status, attempt }))).toEqual([
+        { status: 503, attempt: 1 },
+        { status: 200, attempt: 2 },
+      ]);
+    });
+
+    it("preserves pagination metadata and normalizes legacy arrays", async () => {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ items: [{ id: "a" }], next_cursor: "next", total: 2 }))
+        .mockResolvedValueOnce(jsonResponse([{ id: "b" }]));
+
+      await expect(client.requestPage<{ id: string }>("/instances", { limit: "1" })).resolves.toEqual({
+        items: [{ id: "a" }], next_cursor: "next", total: 2,
+      });
+      await expect(client.requestPage<{ id: string }>("/instances")).resolves.toEqual({
+        items: [{ id: "b" }], next_cursor: null,
+      });
+    });
   });
 
   // ---- Empty body handling ------------------------------------------------
@@ -134,15 +223,24 @@ describe("Orch8Client", () => {
 
   describe("Sequences", () => {
     it("createSequence POSTs to /sequences", async () => {
-      const seq = { id: "seq-1", name: "my-seq", version: 1 };
-      mockFetch.mockResolvedValueOnce(jsonResponse(seq));
+      const response = { id: "seq-1", warnings: ["unknown handler"] };
+      mockFetch.mockResolvedValueOnce(jsonResponse(response));
 
       const result = await client.createSequence({ name: "my-seq", blocks: [] });
 
       const [url, init] = mockFetch.mock.calls[0];
       expect(url).toBe("http://localhost:8080/sequences");
       expect(init.method).toBe("POST");
-      expect(result).toEqual(seq);
+      expect(result).toEqual(response);
+      expect(JSON.parse(init.body)).toMatchObject({
+        tenant_id: "tenant-1",
+        namespace: "default",
+        version: 1,
+        status: "production",
+        name: "my-seq",
+      });
+      expect(JSON.parse(init.body).id).toEqual(expect.any(String));
+      expect(JSON.parse(init.body).created_at).toEqual(expect.any(String));
     });
 
     it("getSequence GETs /sequences/:id", async () => {
@@ -155,6 +253,12 @@ describe("Orch8Client", () => {
       expect(url).toBe("http://localhost:8080/sequences/seq-1");
       expect(init.method).toBe("GET");
       expect(result).toEqual(seq);
+    });
+
+    it("encodes resource IDs as path segments", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ id: "folder/seq" }));
+      await client.getSequence("folder/seq");
+      expect(mockFetch.mock.calls[0][0]).toBe("http://localhost:8080/sequences/folder%2Fseq");
     });
 
     it("getSequenceByName GETs /sequences/by-name with query params", async () => {
@@ -253,7 +357,7 @@ describe("Orch8Client", () => {
 
     it("listInstances GETs /instances without filter", async () => {
       const instances = [{ id: "inst-1" }];
-      mockFetch.mockResolvedValueOnce(jsonResponse(instances));
+      mockFetch.mockResolvedValueOnce(jsonResponse({ items: instances, has_more: false }));
 
       const result = await client.listInstances();
 
@@ -753,15 +857,22 @@ describe("Orch8Client", () => {
       expect(result).toBeUndefined();
     });
 
-    it("heartbeatTask POSTs to /workers/tasks/:id/heartbeat and returns undefined", async () => {
-      mockFetch.mockResolvedValueOnce(emptyBodyResponse());
+    it("heartbeatTask returns the current checkpoint sequence", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ checkpoint_seq: 4 }));
 
       const result = await client.heartbeatTask("task-1", {});
 
       const [url, init] = mockFetch.mock.calls[0];
       expect(url).toBe("http://localhost:8080/workers/tasks/task-1/heartbeat");
       expect(init.method).toBe("POST");
-      expect(result).toBeUndefined();
+      expect(result).toEqual({ checkpoint_seq: 4 });
+    });
+
+    it("heartbeatTask requires a sequence with checkpoint data", async () => {
+      await expect(
+        client.heartbeatTask("task-1", { checkpoint: { cursor: 1 } }),
+      ).rejects.toThrow("checkpoint_seq is required");
+      expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 
@@ -836,7 +947,7 @@ describe("Orch8Client", () => {
   describe("Sequences (additional)", () => {
     it("listSequences GETs /sequences without filter", async () => {
       const seqs = [{ id: "seq-1", name: "my-seq" }];
-      mockFetch.mockResolvedValueOnce(jsonResponse(seqs));
+      mockFetch.mockResolvedValueOnce(jsonResponse({ items: seqs, has_more: false }));
 
       const result = await client.listSequences();
 

@@ -25,16 +25,18 @@ describe("Orch8Client integration / edge cases", () => {
     client = new Orch8Client({
       baseUrl: "http://localhost:8080",
       tenantId: "tenant-1",
+      retry: { baseDelayMs: 0 },
     });
   });
 
-  it("retries are not built-in but network errors surface immediately", async () => {
-    mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+  it("retries network errors before surfacing the final failure", async () => {
+    mockFetch.mockRejectedValue(new Error("ECONNREFUSED"));
     await expect(client.health()).rejects.toThrow("ECONNREFUSED");
+    expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
   it("handles 500 with HTML body gracefully", async () => {
-    mockFetch.mockResolvedValueOnce({
+    mockFetch.mockResolvedValue({
       ok: false,
       status: 502,
       json: () => Promise.reject(new Error("not json")),

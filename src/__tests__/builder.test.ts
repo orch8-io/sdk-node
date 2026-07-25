@@ -160,6 +160,46 @@ describe("workflow() builder", () => {
     expect(sub.input).toEqual({ user_id: "u1" });
   });
 
+  it("builds saga actions and compensations", () => {
+    const wf = workflow("checkout")
+      .saga("checkout_saga", [
+        {
+          id: "charge",
+          action: (b) => b.step("charge_card", "payments.charge"),
+          compensation: (b) => b.step("refund_card", "payments.refund"),
+        },
+      ])
+      .build();
+
+    const saga = wf.blocks[0];
+    if (saga.type !== "saga") throw new Error("type narrowing");
+    expect(saga.steps[0].action).toMatchObject({ handler: "payments.charge" });
+    expect(saga.steps[0].compensation).toMatchObject({ handler: "payments.refund" });
+    expect(BlockDefinitionSchema.parse(saga)).toBeTruthy();
+  });
+
+  it("preserves conditional execution and retry filters", () => {
+    const wf = workflow("conditional")
+      .step("notify", "notify", {}, {
+        when: "data.enabled == true",
+        output_schema: { type: "object" },
+        retry: {
+          max_attempts: 3,
+          initial_backoff: 100,
+          max_backoff: 1_000,
+          retry_if: "error.retryable == true",
+          non_retryable_codes: ["INVALID_INPUT"],
+        },
+      })
+      .build();
+
+    expect(wf.blocks[0]).toMatchObject({
+      when: "data.enabled == true",
+      retry: { retry_if: "error.retryable == true" },
+    });
+    expect(BlockDefinitionSchema.parse(wf.blocks[0])).toBeTruthy();
+  });
+
   it("produces JSON accepted by BlockDefinitionSchema round-trip", () => {
     const wf = workflow("round_trip")
       .step("s1", "http_request", { url: "https://example.com" })

@@ -83,4 +83,27 @@ describe("streamInstance", () => {
       }
     }).rejects.toThrow("Orch8 API error 404");
   });
+
+  it("exposes SSE cursors and sends Last-Event-ID when resuming", async () => {
+    mockFetch.mockResolvedValueOnce(
+      streamResponse(['id: cursor-2\nevent: state\ndata: {"state":"running"}\n\n']),
+    );
+
+    const events = [];
+    for await (const event of client.streamInstanceEvents("folder/inst", {
+      lastEventId: "cursor-1",
+      pollMs: 10,
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([{
+      id: "cursor-2",
+      event: "state",
+      data: { state: "running" },
+    }]);
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe("http://localhost:8080/instances/folder%2Finst/stream?poll_ms=100");
+    expect(init.headers["Last-Event-ID"]).toBe("cursor-1");
+  });
 });

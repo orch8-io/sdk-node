@@ -1,8 +1,10 @@
 export { Orch8Client, Orch8Error } from "./client.js";
-export { Orch8Worker, type WorkerConfig, type HandlerFn } from "./worker.js";
+export { ContinuityClient, type JsonObject, type QueryValue } from "./continuity.js";
+export { Orch8Worker, type WorkerConfig, type HandlerFn, type WorkerRuntimeStats } from "./worker.js";
 export { WorkflowBuilder, workflow, type StepOptions } from "./builder.js";
 export { verifyWebhookSignature } from "./webhook.js";
 export type * from "./types.js";
+export { ORCH8_API_VERSION, ORCH8_ROUTES } from "./generated/routes.js";
 
 // Explicit re-exports from schema to avoid `HumanChoice` ambiguity (also
 // declared in types.ts as a plain interface).
@@ -11,6 +13,7 @@ export {
   DelaySpecSchema,
   SendWindowSchema,
   ContextAccessSchema,
+  FieldAccessSchema,
   HumanChoiceSchema,
   HumanInputDefSchema,
   EscalationDefSchema,
@@ -29,6 +32,8 @@ export {
   ABVariantSchema,
   ABSplitBlockSchema,
   CancellationScopeBlockSchema,
+  SagaStepSchema,
+  SagaBlockSchema,
   SequenceCreateSchema,
 } from "./schema.js";
 
@@ -36,6 +41,7 @@ export type {
   DelaySpec,
   SendWindow,
   ContextAccess,
+  FieldAccess,
   HumanInputDef,
   EscalationDef,
   RetryPolicy,
@@ -53,5 +59,7 @@ export type {
   ABVariant,
   ABSplitBlock,
   CancellationScopeBlock,
+  SagaStep,
+  SagaBlock,
   SequenceCreate,
 } from "./schema.js";

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "contract_version": 1,
+  "defaults": {
+    "timeout_ms": 30000,
+    "max_attempts": 3,
+    "base_delay_ms": 250
+  },
+  "safe_methods": ["GET", "HEAD"],
+  "retryable_statuses": [408, 425, 429, 500, 502, 503, 504],
+  "cases": [
+    {
+      "name": "safe request recovers after transient responses",
+      "method": "GET",
+      "responses": [429, 503, 200],
+      "expected_attempts": 3
+    },
+    {
+      "name": "unsafe request is never replayed",
+      "method": "POST",
+      "responses": [503, 200],
+      "expected_attempts": 1
+    },
+    {
+      "name": "protocol-relative path is rejected",
+      "method": "GET",
+      "path": "//untrusted.test/path",
+      "expected_error": "invalid_path"
+    },
+    {
+      "name": "empty success body maps to no value",
+      "method": "GET",
+      "responses": [204],
+      "expected_body": null
+    }
+  ]
+}
