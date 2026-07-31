@@ -2,25 +2,80 @@ name: Publish
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
+    environment: npm
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: "24"
           registry-url: https://registry.npmjs.org
           cache: npm
       - run: npm ci
       - run: npm run build
       - run: npm test
-      - run: npm publish --provenance --access public
+      - name: Read and validate package version
+        id: package
+        shell: bash
+        run: |
+          package="$(node -p 'require("./package.json").name')"
+          version="$(node -p 'require("./package.json").version')"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package version v$version."
+            exit 1
+          fi
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Check whether the version is already published
+        id: registry
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PACKAGE: ${{ steps.package.outputs.package }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          if npm view "${PACKAGE}@${VERSION}" version --prefer-online > /dev/null 2>&1; then
+            echo "${PACKAGE} ${VERSION} is already on npm; treating this run as verified."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "${PACKAGE} ${VERSION} is not on npm; publication is required."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish npm package
+        if: steps.registry.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set +e
+          output="$(npm publish --provenance --access public 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          if [[ $status -ne 0 ]] &&
+             [[ "$output" != *"cannot publish over the previously published versions"* ]]; then
+            exit "$status"
+          fi
+      - name: Verify npm package
+        env:
+          PACKAGE: ${{ steps.package.outputs.package }}
+          VERSION: ${{ steps.package.outputs.version }}
+        shell: bash
+        run: |
+          for attempt in {1..30}; do
+            published="$(npm view "${PACKAGE}@${VERSION}" version --prefer-online 2>/dev/null || true)"
+            if [[ "$published" == "$VERSION" ]]; then
+              exit 0
+            fi
+            echo "Registry has not exposed ${PACKAGE}@${VERSION} yet (attempt ${attempt}/30)."
+            sleep 10
+          done
+          echo "::error::${PACKAGE}@${VERSION} was not publicly readable after 5 minutes."
+          exit 1
+

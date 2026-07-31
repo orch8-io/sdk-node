@@ -30,7 +30,11 @@
   "keywords": ["orch8", "workflow", "orchestration", "sdk"],
   "repository": {
     "type": "git",
-    "url": "https://github.com/orch8-io/sdk-node"
+    "url": "git+https://github.com/orch8-io/sdk-node.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "license": "MIT",
   "dependencies": {
