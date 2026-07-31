@@ -10,7 +10,7 @@ npm install @orch8/sdk
 
 Requires Node.js 18+.
 
-Version 0.3 supports the current Orch8 0.7-dev sequence contract, including sagas,
+Version 0.7 supports the Orch8 0.7 sequence contract, including sagas,
 conditional steps, filtered retries, output schemas, local-time delays, and
 bounded loop history. Portable continuity APIs are available under
 `client.continuity`.

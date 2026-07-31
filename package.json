@@ -1,6 +1,6 @@
 {
   "name": "@orch8.io/sdk",
-  "version": "0.3.0",
+  "version": "0.7.0",
   "description": "Node.js SDK for Orch8 workflow engine",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -20,14 +20,23 @@
       }
     }
   },
-  "files": ["dist", "!dist/__tests__", "!dist/**/*.map"],
+  "files": [
+    "dist",
+    "!dist/__tests__",
+    "!dist/**/*.map"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "keywords": ["orch8", "workflow", "orchestration", "sdk"],
+  "keywords": [
+    "orch8",
+    "workflow",
+    "orchestration",
+    "sdk"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/orch8-io/sdk-node.git"
