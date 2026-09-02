@@ -61,6 +61,8 @@ export interface InstanceStreamEvent<T = Record<string, unknown>> {
 }
 
 export interface SequenceDefinition {
+  $schema?: string;
+  schema_version: number;
   id: string;
   tenant_id: string;
   namespace: string;

@@ -66,7 +66,7 @@ export interface StepOptions {
  * builder callbacks that receive a fresh builder whose `build()` returns the
  * nested block list.
  */
-export class WorkflowBuilder {
+export class WorkflowBuilder<Handlers extends Record<string, unknown> = Record<string, unknown>> {
   private readonly blocks: BlockDefinition[] = [];
 
   constructor(
@@ -75,21 +75,26 @@ export class WorkflowBuilder {
   ) {}
 
   /** Append a Step block. */
-  step(id: string, handler: string, params: unknown = {}, opts: StepOptions = {}): this {
+  step<Name extends Extract<keyof Handlers, string>>(
+    id: string,
+    handler: Name,
+    params?: Handlers[Name],
+    opts?: StepOptions,
+  ): this {
     const block: StepBlock = {
       type: "step",
       id,
       handler,
-      params,
-      ...opts,
+      params: params ?? {},
+      ...(opts ?? {}),
     };
     this.blocks.push(block);
     return this;
   }
 
   /** Append a Parallel block. All branches run concurrently; completes when all finish. */
-  parallel(id: string, ...branches: Array<(b: WorkflowBuilder) => void>): this {
-    const out: BlockDefinition[][] = branches.map((f) => collectBranch(f, this.namespace));
+  parallel(id: string, ...branches: Array<(b: WorkflowBuilder<Handlers>) => void>): this {
+    const out: BlockDefinition[][] = branches.map((f) => collectBranch<Handlers>(f, this.namespace));
     const block: ParallelBlock = { type: "parallel", id, branches: out };
     this.blocks.push(block);
     return this;
@@ -99,9 +104,9 @@ export class WorkflowBuilder {
   race(
     id: string,
     semantics: RaceSemantics | undefined,
-    ...branches: Array<(b: WorkflowBuilder) => void>
+    ...branches: Array<(b: WorkflowBuilder<Handlers>) => void>
   ): this {
-    const out: BlockDefinition[][] = branches.map((f) => collectBranch(f, this.namespace));
+    const out: BlockDefinition[][] = branches.map((f) => collectBranch<Handlers>(f, this.namespace));
     const block: RaceBlock = { type: "race", id, branches: out, semantics };
     this.blocks.push(block);
     return this;
@@ -110,16 +115,16 @@ export class WorkflowBuilder {
   /** Append a TryCatch block. */
   tryCatch(
     id: string,
-    tryFn: (b: WorkflowBuilder) => void,
-    catchFn: (b: WorkflowBuilder) => void,
-    finallyFn?: (b: WorkflowBuilder) => void,
+    tryFn: (b: WorkflowBuilder<Handlers>) => void,
+    catchFn: (b: WorkflowBuilder<Handlers>) => void,
+    finallyFn?: (b: WorkflowBuilder<Handlers>) => void,
   ): this {
     const block: TryCatchBlock = {
       type: "try_catch",
       id,
-      try_block: collectBranch(tryFn, this.namespace),
-      catch_block: collectBranch(catchFn, this.namespace),
-      finally_block: finallyFn ? collectBranch(finallyFn, this.namespace) : undefined,
+      try_block: collectBranch<Handlers>(tryFn, this.namespace),
+      catch_block: collectBranch<Handlers>(catchFn, this.namespace),
+      finally_block: finallyFn ? collectBranch<Handlers>(finallyFn, this.namespace) : undefined,
     };
     this.blocks.push(block);
     return this;
@@ -129,7 +134,7 @@ export class WorkflowBuilder {
   loop(
     id: string,
     condition: string,
-    body: (b: WorkflowBuilder) => void,
+    body: (b: WorkflowBuilder<Handlers>) => void,
     options?: number | {
       max_iterations?: number;
       break_on?: string;
@@ -143,7 +148,7 @@ export class WorkflowBuilder {
       type: "loop",
       id,
       condition,
-      body: collectBranch(body, this.namespace),
+      body: collectBranch<Handlers>(body, this.namespace),
       ...opts,
     };
     this.blocks.push(block);
@@ -154,7 +159,7 @@ export class WorkflowBuilder {
   forEach(
     id: string,
     collection: string,
-    body: (b: WorkflowBuilder) => void,
+    body: (b: WorkflowBuilder<Handlers>) => void,
     opts: { item_var?: string; max_iterations?: number; retain_iterations?: number } = {},
   ): this {
     const block: ForEachBlock = {
@@ -162,7 +167,7 @@ export class WorkflowBuilder {
       id,
       collection,
       item_var: opts.item_var,
-      body: collectBranch(body, this.namespace),
+      body: collectBranch<Handlers>(body, this.namespace),
       max_iterations: opts.max_iterations,
       retain_iterations: opts.retain_iterations,
     };
@@ -173,18 +178,18 @@ export class WorkflowBuilder {
   /** Append a Router block. First matching route wins. */
   router(
     id: string,
-    routes: Array<{ condition: string; blocks: (b: WorkflowBuilder) => void }>,
-    defaultRoute?: (b: WorkflowBuilder) => void,
+    routes: Array<{ condition: string; blocks: (b: WorkflowBuilder<Handlers>) => void }>,
+    defaultRoute?: (b: WorkflowBuilder<Handlers>) => void,
   ): this {
     const resolvedRoutes: Route[] = routes.map((r) => ({
       condition: r.condition,
-      blocks: collectBranch(r.blocks, this.namespace),
+      blocks: collectBranch<Handlers>(r.blocks, this.namespace),
     }));
     const block: RouterBlock = {
       type: "router",
       id,
       routes: resolvedRoutes,
-      default: defaultRoute ? collectBranch(defaultRoute, this.namespace) : undefined,
+      default: defaultRoute ? collectBranch<Handlers>(defaultRoute, this.namespace) : undefined,
     };
     this.blocks.push(block);
     return this;
@@ -210,12 +215,12 @@ export class WorkflowBuilder {
   /** Append an A/B split. Variant selection is deterministic per instance. */
   abSplit(
     id: string,
-    variants: Array<{ name: string; weight: number; blocks: (b: WorkflowBuilder) => void }>,
+    variants: Array<{ name: string; weight: number; blocks: (b: WorkflowBuilder<Handlers>) => void }>,
   ): this {
     const resolved: ABVariant[] = variants.map((v) => ({
       name: v.name,
       weight: v.weight,
-      blocks: collectBranch(v.blocks, this.namespace),
+      blocks: collectBranch<Handlers>(v.blocks, this.namespace),
     }));
     this.blocks.push({ type: "ab_split", id, variants: resolved });
     return this;
@@ -225,11 +230,11 @@ export class WorkflowBuilder {
    * Append a cancellation scope — children inside this block cannot be cancelled
    * by external cancel signals until they complete.
    */
-  cancellationScope(id: string, body: (b: WorkflowBuilder) => void): this {
+  cancellationScope(id: string, body: (b: WorkflowBuilder<Handlers>) => void): this {
     this.blocks.push({
       type: "cancellation_scope",
       id,
-      blocks: collectBranch(body, this.namespace),
+      blocks: collectBranch<Handlers>(body, this.namespace),
     });
     return this;
   }
@@ -239,17 +244,17 @@ export class WorkflowBuilder {
     id: string,
     steps: Array<{
       id: string;
-      action: (b: WorkflowBuilder) => void;
-      compensation?: (b: WorkflowBuilder) => void;
+      action: (b: WorkflowBuilder<Handlers>) => void;
+      compensation?: (b: WorkflowBuilder<Handlers>) => void;
     }>,
   ): this {
     const resolved: SagaStep[] = steps.map((step) => {
-      const actions = collectBranch(step.action, this.namespace);
+      const actions = collectBranch<Handlers>(step.action, this.namespace);
       if (actions.length !== 1) {
         throw new Error(`Saga step ${step.id} must define exactly one action block`);
       }
       const compensations = step.compensation
-        ? collectBranch(step.compensation, this.namespace)
+        ? collectBranch<Handlers>(step.compensation, this.namespace)
         : [];
       if (compensations.length > 1) {
         throw new Error(`Saga step ${step.id} must define at most one compensation block`);
@@ -309,16 +314,19 @@ export class WorkflowBuilder {
   }
 }
 
-function collectBranch(
-  f: (b: WorkflowBuilder) => void,
+function collectBranch<Handlers extends Record<string, unknown>>(
+  f: (b: WorkflowBuilder<Handlers>) => void,
   namespace: string,
 ): BlockDefinition[] {
-  const inner = new WorkflowBuilder("_inner", namespace);
+  const inner = new WorkflowBuilder<Handlers>("_inner", namespace);
   f(inner);
   return inner._blocks();
 }
 
 /** Create a new workflow builder. */
-export function workflow(name: string, namespace = "default"): WorkflowBuilder {
-  return new WorkflowBuilder(name, namespace);
+export function workflow<Handlers extends Record<string, unknown> = Record<string, unknown>>(
+  name: string,
+  namespace = "default",
+): WorkflowBuilder<Handlers> {
+  return new WorkflowBuilder<Handlers>(name, namespace);
 }

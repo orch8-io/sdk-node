@@ -3,6 +3,7 @@ export { ContinuityClient, type JsonObject, type QueryValue } from "./continuity
 export { Orch8Worker, type WorkerConfig, type HandlerFn, type WorkerRuntimeStats } from "./worker.js";
 export { WorkflowBuilder, workflow, type StepOptions } from "./builder.js";
 export { verifyWebhookSignature } from "./webhook.js";
+export { durableAgentHandler, type AgentRunner, type DurableAgentTask } from "./adapters.js";
 export type * from "./types.js";
 export { ORCH8_API_VERSION, ORCH8_ROUTES } from "./generated/routes.js";
 

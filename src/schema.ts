@@ -297,6 +297,8 @@ export type BlockDefinition =
 
 /** Authoring shape accepted by Orch8Client, which supplies wire identity fields. */
 export const SequenceCreateSchema = z.object({
+  $schema: z.string().url().optional(),
+  schema_version: z.number().int().positive().optional(),
   name: z.string().min(1),
   namespace: z.string().optional(),
   blocks: z.array(BlockDefinitionSchema),

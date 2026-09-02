@@ -37,6 +37,39 @@ const inst = await client.createInstance({
 });
 ```
 
+## Code-first workflow DSL
+
+The exported `workflow()` builder covers every Orch8 block and validates the
+result with the SDK's Zod contract before it is sent. Supply a handler map to
+make handler parameters type-safe:
+
+```typescript
+import { workflow } from "@orch8.io/sdk";
+
+type Handlers = {
+  "send-email": { to: string; subject: string };
+  charge: { customerId: string; cents: number };
+};
+
+const checkout = workflow<Handlers>("checkout")
+  .step("charge", "charge", { customerId: "cus_123", cents: 2500 }, {
+    retry: { max_attempts: 3, initial_backoff: 500, max_backoff: 10_000 },
+  })
+  .step("receipt", "send-email", { to: "buyer@example.com", subject: "Receipt" })
+  .build();
+
+await client.createSequence(checkout);
+```
+
+Nested callbacks retain the same handler map, so steps inside parallel,
+router, loop, saga, and A/B blocks are checked too. Omit the generic when
+integrating a dynamic handler registry.
+
+Framework runners can be exposed as durable workers without adding the
+framework as an SDK dependency: `durableAgentHandler(graph)` supports the
+structural `ainvoke`/`invoke` (LangGraph), `kickoff` (CrewAI), and `run`
+(AutoGen/custom) contracts and pins thread identity to the Orch8 instance.
+
 Request observers and cursor-preserving pagination use the same transport:
 
 ```typescript
