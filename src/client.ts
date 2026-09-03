@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type {
   Orch8ClientConfig,
   RetryConfig,
@@ -284,7 +286,7 @@ export class Orch8Client {
     }
     const prepared = {
       ...body,
-      id: body.id ?? globalThis.crypto.randomUUID(),
+      id: body.id ?? randomUUID(),
       tenant_id: tenantId,
       namespace: body.namespace ?? this.namespace ?? "default",
       version: body.version ?? 1,
