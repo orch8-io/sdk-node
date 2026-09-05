@@ -218,6 +218,8 @@ export interface WorkerTask {
   error_message: string | null;
   error_retryable: boolean | null;
   created_at: string;
+  /** Ownership epoch returned by the server; echo on every acknowledgement. */
+  claim_epoch?: number;
   resume_checkpoint?: unknown;
   checkpoint_seq: number;
 }
@@ -639,12 +641,14 @@ export interface QueuePollRequest {
 }
 
 export interface CompleteRequest {
+  claim_epoch?: number;
   worker_id?: string;
   output?: unknown;
   [key: string]: unknown;
 }
 
 export interface FailRequest {
+  claim_epoch?: number;
   worker_id?: string;
   message?: string;
   error?: string;
@@ -653,6 +657,7 @@ export interface FailRequest {
 }
 
 export interface HeartbeatRequest {
+  claim_epoch?: number;
   worker_id?: string;
   checkpoint?: unknown;
   checkpoint_seq?: number;
@@ -661,4 +666,12 @@ export interface HeartbeatRequest {
 
 export interface HeartbeatResponse {
   checkpoint_seq: number;
+}
+
+/** Poll metadata is absent only when connected to a legacy array-returning server. */
+export interface WorkerPollResponse {
+  tasks: WorkerTask[];
+  lease_secs?: number;
+  heartbeat_interval_secs?: number;
+  poll_after_ms?: number;
 }

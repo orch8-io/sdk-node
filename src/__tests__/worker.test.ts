@@ -452,8 +452,8 @@ describe("Orch8Worker", () => {
       const client = new Orch8Client({ baseUrl: "http://localhost:8080" });
 
       const pollSpy = vi
-        .spyOn(client, "pollTasks")
-        .mockResolvedValue([]);
+        .spyOn(client, "pollTaskBatch")
+        .mockResolvedValue({ tasks: [] });
 
       const worker = new Orch8Worker({
         client,
