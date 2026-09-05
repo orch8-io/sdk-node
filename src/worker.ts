@@ -1,5 +1,5 @@
 import type { WorkerTask } from "./types.js";
-import type { Orch8Client } from "./client.js";
+import { Orch8Client } from "./client.js";
 
 export type HandlerFn = (task: WorkerTask) => Promise<unknown>;
 
@@ -55,9 +55,11 @@ export class Orch8Worker {
     handlers: Record<string, HandlerFn>;
     onTaskComplete?: (task: WorkerTask, output: unknown) => void;
     onTaskFail?: (task: WorkerTask, error: string) => void;
-    client?: Orch8Client;
   };
 
+  private readonly client: Orch8Client;
+  private pollHints = new Map<string, number>();
+  private heartbeatIntervals = new Map<string, number>();
   private running = false;
   private pollTimers = new Map<string, NodeJS.Timeout>();
   private heartbeatTimer: NodeJS.Timeout | null = null;
@@ -83,8 +85,8 @@ export class Orch8Worker {
       circuitBreakerCheck: config.circuitBreakerCheck ?? false,
       onTaskComplete: config.onTaskComplete,
       onTaskFail: config.onTaskFail,
-      client: config.client,
     };
+    this.client = config.client ?? new Orch8Client({ baseUrl: this.config.engineUrl, retry: false });
     this.concurrencySemaphore = this.config.maxConcurrent;
   }
 
@@ -99,9 +101,7 @@ export class Orch8Worker {
     }
 
     // Start heartbeat loop.
-    this.heartbeatTimer = setInterval(() => {
-      void this.sendHeartbeats();
-    }, this.config.heartbeatIntervalMs);
+    this.resetHeartbeatTimer();
   }
 
   private schedulePoll(handlerName: string, delayMs: number): void {
@@ -120,7 +120,7 @@ export class Orch8Worker {
                 this.config.pollIntervalMs * Math.pow(2, failures),
                 Orch8Worker.MAX_BACKOFF_MS,
               )
-            : this.config.pollIntervalMs;
+            : Math.max(this.config.pollIntervalMs, this.pollHints.get(handlerName) ?? 0);
         this.schedulePoll(handlerName, nextDelay);
       });
     }, delayMs);
@@ -138,8 +138,13 @@ export class Orch8Worker {
     // Drain in-flight tasks with a hard timeout.
     const drainTimeoutMs = 30_000;
     const drain = Promise.allSettled(Array.from(this.executingPromises));
-    const timeout = new Promise<void>((resolve) => setTimeout(resolve, drainTimeoutMs));
-    await Promise.race([drain, timeout]);
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<void>((resolve) => { timer = setTimeout(resolve, drainTimeoutMs); });
+    try {
+      await Promise.race([drain, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   stats(): WorkerRuntimeStats {
@@ -157,19 +162,8 @@ export class Orch8Worker {
     // Circuit breaker check: skip polling if the handler's circuit is open.
     if (this.config.circuitBreakerCheck) {
       try {
-        if (this.config.client) {
-          const cb = await this.config.client.getCircuitBreaker(handlerName);
-          if (cb.state === "open") return;
-        } else {
-          const cbRes = await fetch(
-            `${this.config.engineUrl}/circuit-breakers/${handlerName}`,
-            { method: "GET", headers: { "Content-Type": "application/json" } },
-          );
-          if (cbRes.ok) {
-            const cb = (await cbRes.json()) as { state: string };
-            if (cb.state === "open") return;
-          }
-        }
+        const cb = await this.client.getCircuitBreaker(handlerName);
+        if (cb.state === "open") return;
       } catch {
         // If the check fails, proceed with polling anyway.
       }
@@ -178,33 +172,20 @@ export class Orch8Worker {
     try {
       const limit = Math.min(this.concurrencySemaphore, this.config.maxConcurrent);
 
-      let tasks: WorkerTask[];
-      if (this.config.client) {
-        tasks = await this.config.client.pollTasks({
-          handler_name: handlerName,
-          worker_id: this.config.workerId,
-          limit,
-        });
-      } else {
-        const res = await fetch(`${this.config.engineUrl}/workers/tasks/poll`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            handler_name: handlerName,
-            worker_id: this.config.workerId,
-            limit,
-          }),
-        });
-
-        if (!res.ok) {
-          this.consecutiveFailures.set(
-            handlerName,
-            (this.consecutiveFailures.get(handlerName) ?? 0) + 1,
-          );
-          return;
-        }
-        tasks = (await res.json()) as WorkerTask[];
-      }
+      const batch = await this.client.pollTaskBatch({
+        handler_name: handlerName,
+        worker_id: this.config.workerId,
+        limit,
+      });
+      const tasks = batch.tasks;
+      this.pollHints.set(handlerName, batch.poll_after_ms ?? 0);
+      const heartbeatMs = Math.min(
+        this.config.heartbeatIntervalMs,
+        (batch.heartbeat_interval_secs ?? Infinity) * 1000,
+        (batch.lease_secs ?? Infinity) * 500,
+      );
+      this.heartbeatIntervals.set(handlerName, heartbeatMs);
+      if (this.running) this.resetHeartbeatTimer();
 
       // Reset backoff on successful poll.
       this.consecutiveFailures.set(handlerName, 0);
@@ -229,26 +210,29 @@ export class Orch8Worker {
   private async executeTask(task: WorkerTask): Promise<void> {
     const handler = this.config.handlers[task.handler_name];
     if (!handler) {
-      await this.failTask(task.id, `no handler registered for "${task.handler_name}"`, false);
+      await this.failTask(task, `no handler registered for "${task.handler_name}"`, false).catch(() => {});
       this.inFlightTasks.delete(task.id);
       this.concurrencySemaphore++;
       return;
     }
 
     try {
-      const output = await this.withTimeout(handler(task), task.timeout_ms);
-      await this.completeTask(task.id, output);
+      let output: unknown;
+      try {
+        output = await this.withTimeout(handler(task), task.timeout_ms);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const retryable = err instanceof Error && "retryable" in err
+          ? Boolean(err.retryable) : false;
+        await this.failTask(task, message, retryable);
+        this.notify(() => this.config.onTaskFail?.(task, message));
+        return;
+      }
+      // A rejected or ambiguous acknowledgement is not a handler failure.
+      await this.completeTask(task, output);
       this.notify(() => this.config.onTaskComplete?.(task, output));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      // If the error exposes a retryable flag, respect it. Otherwise default
-      // to non-retryable (conservative — matches engine FailRequest default).
-      const retryable =
-        err instanceof Error && "retryable" in err
-          ? Boolean((err as Error & { retryable: unknown }).retryable)
-          : false;
-      await this.failTask(task.id, message, retryable);
-      this.notify(() => this.config.onTaskFail?.(task, message));
+    } catch {
+      // Leave unacknowledged work for lease recovery; never report success.
     } finally {
       this.inFlightTasks.delete(task.id);
       this.concurrencySemaphore++;
@@ -265,78 +249,50 @@ export class Orch8Worker {
 
   private async withTimeout<T>(promise: Promise<T>, timeoutMs: number | null): Promise<T> {
     if (!timeoutMs) return promise;
-    let timer: NodeJS.Timeout;
+    let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error("task timed out")), timeoutMs);
     });
     try {
       return await Promise.race([promise, timeout]);
     } finally {
-      clearTimeout(timer!);
+      clearTimeout(timer);
     }
   }
 
-  private async completeTask(taskId: string, output: unknown): Promise<void> {
-    try {
-      if (this.config.client) {
-        await this.config.client.completeTask(taskId, {
-          worker_id: this.config.workerId,
-          output: output ?? {},
-        });
-      } else {
-        await fetch(`${this.config.engineUrl}/workers/tasks/${taskId}/complete`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            worker_id: this.config.workerId,
-            output: output ?? {},
-          }),
-        });
-      }
-    } catch {
-      // Will be reaped and retried.
-    }
+  private completeTask(task: WorkerTask, output: unknown): Promise<void> {
+    return this.client.completeTask(task.id, {
+      worker_id: this.config.workerId,
+      claim_epoch: task.claim_epoch,
+      output: output ?? {},
+    });
   }
 
-  private async failTask(taskId: string, message: string, retryable: boolean): Promise<void> {
-    try {
-      if (this.config.client) {
-        await this.config.client.failTask(taskId, {
-          worker_id: this.config.workerId,
-          message,
-          retryable,
-        });
-      } else {
-        await fetch(`${this.config.engineUrl}/workers/tasks/${taskId}/fail`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            worker_id: this.config.workerId,
-            message,
-            retryable,
-          }),
-        });
-      }
-    } catch {
-      // Will be reaped and retried.
-    }
+  private failTask(task: WorkerTask, message: string, retryable: boolean): Promise<void> {
+    return this.client.failTask(task.id, {
+      worker_id: this.config.workerId,
+      claim_epoch: task.claim_epoch,
+      message,
+      retryable,
+    });
+  }
+
+  private heartbeatDelayMs = 0;
+
+  private resetHeartbeatTimer(): void {
+    const delay = Math.min(this.config.heartbeatIntervalMs, ...this.heartbeatIntervals.values());
+    if (this.heartbeatTimer && delay === this.heartbeatDelayMs) return;
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.heartbeatDelayMs = delay;
+    this.heartbeatTimer = setInterval(() => { void this.sendHeartbeats(); }, delay);
   }
 
   private async sendHeartbeats(): Promise<void> {
-    const ids = Array.from(this.inFlightTasks.keys());
     await Promise.allSettled(
-      ids.map((taskId) => {
-        if (this.config.client) {
-          return this.config.client.heartbeatTask(taskId, {
-            worker_id: this.config.workerId,
-          });
-        }
-        return fetch(`${this.config.engineUrl}/workers/tasks/${taskId}/heartbeat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ worker_id: this.config.workerId }),
-        });
-      }),
+      Array.from(this.inFlightTasks.values(), (task) => this.client.heartbeatTask(task.id, {
+        worker_id: this.config.workerId,
+        claim_epoch: task.claim_epoch,
+      })),
     );
   }
 }

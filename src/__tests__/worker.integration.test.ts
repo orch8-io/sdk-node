@@ -77,8 +77,8 @@ describe("Orch8Worker integration", () => {
     const handler = vi.fn().mockResolvedValue({ done: true });
 
     const pollSpy = vi
-      .spyOn(client, "pollTasks")
-      .mockResolvedValue([
+      .spyOn(client, "pollTaskBatch")
+      .mockResolvedValue({ tasks: [
         {
           id: "wt-client",
           instance_id: "inst-1",
@@ -87,7 +87,7 @@ describe("Orch8Worker integration", () => {
           state: "claimed",
           created_at: "2025-01-01T00:00:00Z",
         } as any,
-      ]);
+      ] });
     const completeSpy = vi
       .spyOn(client, "completeTask")
       .mockResolvedValue(undefined);

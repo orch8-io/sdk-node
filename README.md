@@ -119,27 +119,51 @@ const client = new Orch8Client({
 
 ## Worker
 
-Run a polling worker that claims and executes tasks:
+Run a polling worker using `x-api-key` and `x-tenant-id` authentication:
 
 ```typescript
-import { Orch8Client, Orch8Worker } from "@orch8/sdk";
+import { Orch8Client, Orch8Worker } from "@orch8.io/sdk";
 
-const client = new Orch8Client({ baseUrl: "https://api.orch8.io", tenantId: "my-tenant" });
+const client = new Orch8Client({
+  baseUrl: process.env.ORCH8_ENGINE_URL ?? "http://localhost:8080",
+  tenantId: process.env.ORCH8_TENANT_ID,
+  headers: { "x-api-key": process.env.ORCH8_API_KEY ?? "" },
+});
 
 const worker = new Orch8Worker({
   client,
   workerId: "worker-1",
   handlers: {
-    "send-email": async (task) => {
-      console.log(`Sending email to ${task.params.to}`);
-      return { sent: true };
+    "inspect-document": async (task) => {
+      // Replace with your bounded task implementation.
+      return { inspected: true, input: task.params };
     },
   },
   maxConcurrent: 10,
 });
 
-await worker.start(); // blocks until worker.stop() is called
+await worker.start(); // Starts polling and returns immediately.
+process.once("SIGTERM", () => { void worker.stop(); });
+process.once("SIGINT", () => { void worker.stop(); });
 ```
+
+The worker echoes each task's `claim_epoch` on heartbeat, completion, and failure.
+It respects the server's minimum poll delay and uses a heartbeat interval no
+longer than the advertised interval or half the lease duration. Completion
+callbacks run only after a successful acknowledgement; rejected or ambiguous
+acknowledgements are left for lease recovery, without sending a contradictory
+failure request.
+
+`client.pollTasks()` and `client.pollTasksFromQueue()` still return task arrays.
+Use `client.pollTaskBatch()` or `client.pollTaskBatchFromQueue()` to access
+`tasks`, `lease_secs`, `heartbeat_interval_secs`, and `poll_after_ms` when writing
+your own loop. Legacy array responses are accepted at the client boundary, with
+no timing hints. Epoch fields remain optional in the types for legacy servers;
+always echo the epoch supplied by a current server in custom worker loops.
+
+A lease does not authorize offline execution. Handlers are not forcibly cancelled
+on lease loss or timeout; use bounded work and provider idempotency keys for
+external effects. `stop()` waits up to 30 seconds for executing handlers.
 
 ## Error Handling
 

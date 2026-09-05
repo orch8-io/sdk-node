@@ -19,6 +19,7 @@ import type {
   PluginDef,
   Session,
   WorkerTask,
+  WorkerPollResponse,
   ClusterNode,
   CircuitBreaker,
   AuditEntry,
@@ -700,10 +701,16 @@ export class Orch8Client {
   // Workers
   // ---------------------------------------------------------------------------
 
-  pollTasks(
+  async pollTasks(
     body: PollRequest | Record<string, unknown>,
   ): Promise<WorkerTask[]> {
-    return this.post<WorkerTask[]>("/workers/tasks/poll", body);
+    return (await this.pollTaskBatch(body)).tasks;
+  }
+
+  async pollTaskBatch(
+    body: PollRequest | Record<string, unknown>,
+  ): Promise<WorkerPollResponse> {
+    return decodeWorkerPoll(await this.post<unknown>("/workers/tasks/poll", body));
   }
 
   completeTask(
@@ -739,10 +746,16 @@ export class Orch8Client {
     return this.get<Record<string, unknown>>("/workers/tasks/stats");
   }
 
-  pollTasksFromQueue(
+  async pollTasksFromQueue(
     body: QueuePollRequest | Record<string, unknown>,
   ): Promise<WorkerTask[]> {
-    return this.post<WorkerTask[]>("/workers/tasks/poll/queue", body);
+    return (await this.pollTaskBatchFromQueue(body)).tasks;
+  }
+
+  async pollTaskBatchFromQueue(
+    body: QueuePollRequest | Record<string, unknown>,
+  ): Promise<WorkerPollResponse> {
+    return decodeWorkerPoll(await this.post<unknown>("/workers/tasks/poll/queue", body));
   }
 
   // ---------------------------------------------------------------------------
@@ -972,4 +985,22 @@ export class Orch8Client {
   health(): Promise<HealthResponse> {
     return this.get<HealthResponse>("/health/ready");
   }
+}
+
+/** Normalize the legacy wire format only at the HTTP boundary. */
+export function decodeWorkerPoll(value: unknown): WorkerPollResponse {
+  if (Array.isArray(value)) return { tasks: value };
+  if (!value || typeof value !== "object" || !("tasks" in value) || !Array.isArray(value.tasks)) {
+    throw new TypeError("Worker poll response must contain a tasks array");
+  }
+  const response: WorkerPollResponse = { tasks: value.tasks };
+  for (const key of ["lease_secs", "heartbeat_interval_secs", "poll_after_ms"] as const) {
+    if (!(key in value)) continue;
+    const hint = (value as Record<string, unknown>)[key];
+    if (typeof hint !== "number" || !Number.isFinite(hint) || hint < 0 || (key !== "poll_after_ms" && hint === 0)) {
+      throw new TypeError(`Invalid worker poll hint: ${key}`);
+    }
+    response[key] = hint;
+  }
+  return response;
 }
