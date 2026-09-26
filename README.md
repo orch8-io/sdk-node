@@ -305,6 +305,73 @@ export default createCloudflarePushHandler((env: Env) => ({
 receivers. Signature checks need the raw body bytes; do not re-serialize parsed
 JSON. Keep handlers well inside your platform's function timeout.
 
+## Framework integrations
+
+Each integration is a separate subpath with its framework as an optional peer
+dependency, so unused integrations never load.
+
+### Express (`@orch8.io/sdk/express`)
+
+```typescript
+import express from "express";
+import { orch8Express, getOrch8 } from "@orch8.io/sdk/express";
+
+const app = express();
+app.use(orch8Express({
+  client,                                  // attached as req.orch8
+  push: {                                  // optional push receiver
+    path: "/orch8/push",                   // default
+    secret: process.env.ORCH8_PUSH_SECRET!,
+    handlers: { "send-email": async (task) => sendEmail(task.params) },
+  },
+}));
+app.use(express.json());                   // after orch8Express, or:
+// app.use(express.json({ verify: orch8RawBody })) before it
+
+app.post("/signup", async (req, res) => {
+  const job = await getOrch8(req).jobs.enqueue("send-email", { to: req.body.email });
+  res.json({ job: job.id });
+});
+```
+
+### NestJS (`@orch8.io/sdk/nestjs`)
+
+```typescript
+import { Injectable, Module } from "@nestjs/common";
+import { Orch8Client, type WorkerTask } from "@orch8.io/sdk";
+import { Orch8Handler, Orch8Module } from "@orch8.io/sdk/nestjs";
+
+@Injectable()
+export class EmailHandlers {
+  @Orch8Handler("send-email")
+  async send(task: WorkerTask) {
+    return { sent: true };
+  }
+}
+
+@Injectable()
+export class SignupService {
+  constructor(private readonly orch8: Orch8Client) {}   // or @Inject(ORCH8_CLIENT)
+}
+
+@Module({
+  imports: [
+    Orch8Module.forRoot({
+      client: { baseUrl: process.env.ORCH8_URL!, tenantId: "acme" },
+      worker: { workerId: `api-${process.pid}` },      // optional: poll with discovered handlers
+    }),
+  ],
+  providers: [EmailHandlers, SignupService],
+})
+export class AppModule {}
+```
+
+`forRoot` registers the module globally, discovers `@Orch8Handler` methods on
+providers and controllers, starts an `Orch8Worker` on bootstrap when `worker`
+is set, and stops it on shutdown (enable `app.enableShutdownHooks()`). Inject
+`Orch8HandlerRegistry` to read the handler map or call
+`registry.createPushHandler({ secret })` from a controller for push dispatch.
+
 ## Testing
 
 `@orch8.io/sdk/testing` provides two in-process environments.
