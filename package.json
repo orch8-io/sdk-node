@@ -72,6 +72,26 @@
         "default": "./dist/nestjs/index.js"
       }
     },
+    "./ai-sdk": {
+      "import": {
+        "types": "./dist/ai/ai-sdk.d.ts",
+        "default": "./dist/ai/ai-sdk.js"
+      },
+      "require": {
+        "types": "./dist/ai/ai-sdk.d.ts",
+        "default": "./dist/ai/ai-sdk.js"
+      }
+    },
+    "./openai-agents": {
+      "import": {
+        "types": "./dist/ai/openai-agents.d.ts",
+        "default": "./dist/ai/openai-agents.js"
+      },
+      "require": {
+        "types": "./dist/ai/openai-agents.d.ts",
+        "default": "./dist/ai/openai-agents.js"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -107,7 +127,9 @@
     "@orch8/engine-native": ">=0.7.1",
     "express": ">=4",
     "@nestjs/common": ">=10",
-    "@nestjs/core": ">=10"
+    "@nestjs/core": ">=10",
+    "ai": ">=4",
+    "@openai/agents": ">=0.1"
   },
   "peerDependenciesMeta": {
     "@orch8/engine-native": {
@@ -120,6 +142,12 @@
       "optional": true
     },
     "@nestjs/core": {
+      "optional": true
+    },
+    "ai": {
+      "optional": true
+    },
+    "@openai/agents": {
       "optional": true
     }
   },

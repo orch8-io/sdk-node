@@ -1,6 +1,7 @@
 import type { Orch8Client } from "../client.js";
 import type { WorkerTask } from "../types.js";
 import type { HandlerFn } from "../worker.js";
+import { subtle, toHex } from "../internal/webcrypto.js";
 
 /**
  * Body the engine POSTs to a push-mode queue's `push_url` (see
@@ -101,27 +102,6 @@ function isPlainRecord(value: unknown): boolean {
   if (value === null || typeof value !== "object") return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
-}
-
-type Subtle = SubtleCrypto;
-
-let subtlePromise: Promise<Subtle> | undefined;
-function subtle(): Promise<Subtle> {
-  subtlePromise ??= (async () => {
-    const globalCrypto = (globalThis as { crypto?: Crypto }).crypto;
-    if (globalCrypto?.subtle) return globalCrypto.subtle;
-    // Node 18 exposes Web Crypto only through node:crypto. The indirect
-    // require keeps edge bundlers from trying to resolve the builtin.
-    const req = typeof require === "function" ? require : undefined;
-    const nodeCrypto = req?.("node:crypto") as { webcrypto?: Crypto } | undefined;
-    if (nodeCrypto?.webcrypto?.subtle) return nodeCrypto.webcrypto.subtle;
-    throw new Error("Web Crypto is not available in this runtime");
-  })();
-  return subtlePromise;
-}
-
-function toHex(bytes: ArrayBuffer): string {
-  return Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** Constant-time comparison of two ASCII strings. */

@@ -372,6 +372,60 @@ is set, and stops it on shutdown (enable `app.enableShutdownHooks()`). Inject
 `Orch8HandlerRegistry` to read the handler map or call
 `registry.createPushHandler({ secret })` from a controller for push dispatch.
 
+### Durable AI tools (`@orch8.io/sdk/ai-sdk`, `@orch8.io/sdk/openai-agents`)
+
+Following the engine's framework-adapter pattern, tool calls go behind
+idempotent Orch8 steps and agent loops checkpoint at turn boundaries. Each
+wrapped tool call becomes a background job whose idempotency key is
+`${scope}:${toolName}:${toolCallId}`: a retried or replayed turn with the same
+call id returns the recorded result instead of charging the card twice. The
+original tools run on an ordinary worker. The adapters rely on the `/jobs` API
+(see Background jobs).
+
+```typescript
+// Vercel AI SDK
+import { generateText, tool } from "ai";
+import { durableTools, aiSdkToolHandlers, checkpointSteps, TurnCheckpointer } from "@orch8.io/sdk/ai-sdk";
+
+const tools = { chargeCard: tool({ description: "...", inputSchema, execute: charge }) };
+
+// Worker process: executes the real tools (handler names "ai-tool.<name>").
+new Orch8Worker({ client, workerId: "tools-1", handlers: aiSdkToolHandlers(tools) });
+
+// Agent process (e.g. inside an "agent-turn" worker handler):
+async function agentTurn(task: WorkerTask) {
+  const checkpointer = new TurnCheckpointer({ client, task, workerId: "agent-1" });
+  const previous = checkpointer.resume();            // state from a crashed attempt, if any
+  return generateText({
+    model,
+    tools: durableTools(tools, { client, scope: task.instance_id }),
+    messages: previous?.messages ?? initialMessages,
+    onStepFinish: checkpointSteps(checkpointer),     // checkpoint every model step
+  });
+}
+```
+
+```typescript
+// OpenAI Agents SDK (JS)
+import { Agent, run, RunState } from "@openai/agents";
+import { durableAgentTools, agentToolHandlers, checkpointRunState, TurnCheckpointer } from "@orch8.io/sdk/openai-agents";
+
+const agent = new Agent({ name: "support", tools: durableAgentTools([lookupOrder, refund], { client, scope: threadId }) });
+const handlers = agentToolHandlers([lookupOrder, refund]);   // register on a worker
+
+const checkpointer = new TurnCheckpointer({ client, task, workerId });
+const saved = checkpointer.resume();
+const input = saved ? await RunState.fromString(agent, saved.state) : userMessage;
+const result = await run(agent, input);
+await checkpointRunState(checkpointer, result);              // one checkpoint per turn
+```
+
+Hosted tools and handoffs pass through unchanged. A call that ends `failed`,
+`cancelled`, or `dead_lettered` throws `DurableToolError` into the agent loop.
+Checkpoints use the worker heartbeat checkpoint API (compare-and-swap on
+`checkpoint_seq`, 256 KiB limit); pass a `select` function to
+`checkpointSteps` to store less than the full message list.
+
 ## Testing
 
 `@orch8.io/sdk/testing` provides two in-process environments.
