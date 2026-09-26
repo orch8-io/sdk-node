@@ -211,6 +211,69 @@ A lease does not authorize offline execution. Handlers are not forcibly cancelle
 on lease loss or timeout; use bounded work and provider idempotency keys for
 external effects. `stop()` waits up to 30 seconds for executing handlers.
 
+## Push dispatch (serverless workers)
+
+A queue switched to push mode (`POST /queues/dispatch` with
+`{ tenant_id, queue_name, mode: "push", push_url, secret }`) makes the engine
+POST a task envelope to `push_url` when a task is enqueued. The engine signs it
+with `X-Orch8-Timestamp` and `X-Orch8-Signature: sha256=<hex HMAC-SHA256(secret,
+"{ts}.{raw body}")>`, and retries the delivery up to three times on a non-2xx
+response.
+
+The envelope is a wake-up, not a lease: the task is still `pending` and has no
+`claim_epoch`. The helpers in `@orch8.io/sdk/push` therefore:
+
+1. verify the signature in constant time and reject timestamps more than 300 s
+   off (`toleranceSeconds`) with `401`;
+2. claim from the envelope's queue via `POST /workers/tasks/poll/queue`
+   (`claimLimit`, default 1; the claimed task may be an older pending task on
+   the same queue);
+3. run your handler and `complete`/`fail` with the claim epoch, like
+   `Orch8Worker` does.
+
+Handler failures are reported to the engine and answered with `200`; a failed
+claim poll answers `502` so the engine retries the push.
+
+```typescript
+// app/api/orch8/route.ts — Next.js App Router
+import { Orch8Client } from "@orch8.io/sdk";
+import { createNextPushRoute } from "@orch8.io/sdk/push";
+
+const client = new Orch8Client({
+  baseUrl: process.env.ORCH8_URL!,
+  tenantId: process.env.ORCH8_TENANT_ID,
+  headers: { "x-api-key": process.env.ORCH8_API_KEY! },
+});
+
+export const { POST } = createNextPushRoute({
+  client,
+  secret: process.env.ORCH8_PUSH_SECRET!,
+  handlers: { "send-email": async (task) => sendEmail(task.params) },
+});
+```
+
+Other runtimes use the same options:
+
+```typescript
+import {
+  createWebPushHandler,        // (Request) => Promise<Response>: Vercel, Deno, Bun
+  createLambdaPushHandler,     // API Gateway REST/HTTP API, Lambda Function URLs
+  createCloudflarePushHandler, // { fetch(request, env) }, options may be built from env
+} from "@orch8.io/sdk/push";
+
+export const handler = createLambdaPushHandler({ client, secret, handlers });
+
+export default createCloudflarePushHandler((env: Env) => ({
+  client: new Orch8Client({ baseUrl: env.ORCH8_URL, headers: { "x-api-key": env.ORCH8_API_KEY } }),
+  secret: env.ORCH8_PUSH_SECRET,
+  handlers,
+}));
+```
+
+`verifyPushSignature(rawBody, headers, secret)` is exported for custom
+receivers. Signature checks need the raw body bytes; do not re-serialize parsed
+JSON. Keep handlers well inside your platform's function timeout.
+
 ## Error Handling
 
 ```typescript

@@ -18,7 +18,18 @@
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
       }
-    }
+    },
+    "./push": {
+      "import": {
+        "types": "./dist/push/index.d.ts",
+        "default": "./dist/push/index.js"
+      },
+      "require": {
+        "types": "./dist/push/index.d.ts",
+        "default": "./dist/push/index.js"
+      }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
