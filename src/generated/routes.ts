@@ -2,11 +2,43 @@
 export const ORCH8_API_VERSION = "1.0.0";
 export const ORCH8_ROUTES = [
   {
+    "operationId": "accept_external_handoff",
+    "method": "POST",
+    "path": "/continuity/handoffs/{id}/accept-external",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "accept_handoff",
+    "method": "POST",
+    "path": "/continuity/handoffs/{id}/accept",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "accept_optimization",
+    "method": "POST",
+    "path": "/continuity/optimizations/{id}/accept",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "ack_command",
     "method": "DELETE",
     "path": "/workers/commands/{id}",
     "tags": [
       "workers"
+    ]
+  },
+  {
+    "operationId": "act",
+    "method": "POST",
+    "path": "/approvals/act/{token}",
+    "tags": [
+      "approvals"
     ]
   },
   {
@@ -18,11 +50,51 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "append_evaluation",
+    "method": "POST",
+    "path": "/continuity/executions/{id}/evaluations",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "append_stream_frame",
+    "method": "POST",
+    "path": "/continuity/streams/{id}/frames",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "apply_live_migration",
+    "method": "POST",
+    "path": "/continuity/migrations/{id}/apply",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "apply_remediation",
     "method": "POST",
     "path": "/instances/{id}/remediations/apply",
     "tags": [
       "instances"
+    ]
+  },
+  {
+    "operationId": "assign_attention_task",
+    "method": "POST",
+    "path": "/continuity/attention/{id}/assign",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "attach_device_capsule",
+    "method": "POST",
+    "path": "/continuity/handoffs/{id}/attach-device-capsule",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -50,6 +122,54 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "cancel_job",
+    "method": "DELETE",
+    "path": "/jobs/{id}",
+    "tags": [
+      "jobs"
+    ]
+  },
+  {
+    "operationId": "certify",
+    "method": "POST",
+    "path": "/continuity/conformance/certificates",
+    "tags": [
+      "continuity-product"
+    ]
+  },
+  {
+    "operationId": "choose_placement",
+    "method": "POST",
+    "path": "/continuity/executions/{id}/placement",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "choose_provider",
+    "method": "POST",
+    "path": "/continuity/providers/choose",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "claim_compensation_step",
+    "method": "POST",
+    "path": "/continuity/compensations/{id}/claim",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "claim_delegation",
+    "method": "POST",
+    "path": "/continuity/delegations/claim",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "compare_runs",
     "method": "GET",
     "path": "/instances/{id}/compare/{other}",
@@ -66,11 +186,27 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "compile_policy",
+    "method": "POST",
+    "path": "/continuity/policies/compile",
+    "tags": [
+      "continuity-product"
+    ]
+  },
+  {
     "operationId": "compile_stored",
     "method": "GET",
     "path": "/sequences/{id}/dataflow",
     "tags": [
       "sequences"
+    ]
+  },
+  {
+    "operationId": "complete_compensation_step",
+    "method": "POST",
+    "path": "/continuity/compensations/{id}/steps/{effect_id}/complete",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -82,11 +218,67 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "confirm_page",
+    "method": "GET",
+    "path": "/approvals/act/{token}",
+    "tags": [
+      "approvals"
+    ]
+  },
+  {
+    "operationId": "consume_continuation_grant",
+    "method": "POST",
+    "path": "/continuity/grants/consume",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "create_attention_task",
+    "method": "POST",
+    "path": "/continuity/attention",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "create_budget",
+    "method": "POST",
+    "path": "/budgets",
+    "tags": [
+      "budgets"
+    ]
+  },
+  {
+    "operationId": "create_compensation_run",
+    "method": "POST",
+    "path": "/continuity/executions/{id}/compensations",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "create_cron",
     "method": "POST",
     "path": "/cron",
     "tags": [
       "cron"
+    ]
+  },
+  {
+    "operationId": "create_execution",
+    "method": "POST",
+    "path": "/continuity/executions",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "create_handoff",
+    "method": "POST",
+    "path": "/continuity/handoffs",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -106,6 +298,14 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "create_invariant",
+    "method": "POST",
+    "path": "/continuity/invariants",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "create_pool",
     "method": "POST",
     "path": "/pools",
@@ -114,11 +314,27 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "create_profile_offer",
+    "method": "POST",
+    "path": "/continuity/profiles/{profile}/offers",
+    "tags": [
+      "continuity-product"
+    ]
+  },
+  {
     "operationId": "create_release",
     "method": "POST",
     "path": "/releases",
     "tags": [
       "releases"
+    ]
+  },
+  {
+    "operationId": "create_rule",
+    "method": "POST",
+    "path": "/alerts/rules",
+    "tags": [
+      "alerts"
     ]
   },
   {
@@ -146,6 +362,22 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "create_share",
+    "method": "POST",
+    "path": "/instances/{id}/share",
+    "tags": [
+      "instances"
+    ]
+  },
+  {
+    "operationId": "create_stream",
+    "method": "POST",
+    "path": "/continuity/streams",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "create_trigger",
     "method": "POST",
     "path": "/triggers",
@@ -159,6 +391,22 @@ export const ORCH8_ROUTES = [
     "path": "/debug/template",
     "tags": [
       "debug"
+    ]
+  },
+  {
+    "operationId": "decide_attention_task",
+    "method": "POST",
+    "path": "/continuity/attention/{id}/decide",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "delete_budget",
+    "method": "DELETE",
+    "path": "/budgets/{id}",
+    "tags": [
+      "budgets"
     ]
   },
   {
@@ -186,11 +434,27 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "delete_prompt_label",
+    "method": "DELETE",
+    "path": "/prompts/{name}/labels/{label}",
+    "tags": [
+      "prompts"
+    ]
+  },
+  {
     "operationId": "delete_resource",
     "method": "DELETE",
     "path": "/pools/{pool_id}/resources/{resource_id}",
     "tags": [
       "pools"
+    ]
+  },
+  {
+    "operationId": "delete_rule",
+    "method": "DELETE",
+    "path": "/alerts/rules/{id}",
+    "tags": [
+      "alerts"
     ]
   },
   {
@@ -258,6 +522,22 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "embed_loader",
+    "method": "GET",
+    "path": "/public/progress/embed.js",
+    "tags": [
+      "public"
+    ]
+  },
+  {
+    "operationId": "embed_page",
+    "method": "GET",
+    "path": "/public/progress/{token}/embed",
+    "tags": [
+      "public"
+    ]
+  },
+  {
     "operationId": "enqueue_command",
     "method": "POST",
     "path": "/workers/commands",
@@ -266,11 +546,75 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "enqueue_job",
+    "method": "POST",
+    "path": "/jobs",
+    "tags": [
+      "jobs"
+    ]
+  },
+  {
+    "operationId": "evaluate_gate",
+    "method": "POST",
+    "path": "/continuity/evaluations/gate",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "evaluate_invariants",
+    "method": "POST",
+    "path": "/continuity/executions/{id}/invariants/evaluate",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "evaluate_release",
     "method": "POST",
     "path": "/releases/{id}/evaluate",
     "tags": [
       "releases"
+    ]
+  },
+  {
+    "operationId": "evaluate_residency",
+    "method": "POST",
+    "path": "/continuity/residency/evaluate",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "evaluate_stored_gate",
+    "method": "POST",
+    "path": "/continuity/evaluations/stored-gate",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "export_handoff",
+    "method": "POST",
+    "path": "/continuity/handoffs/{id}/export",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "extract_test_fixture",
+    "method": "POST",
+    "path": "/continuity/executions/{id}/test-fixture",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "fail_compensation_step",
+    "method": "POST",
+    "path": "/continuity/compensations/{id}/steps/{effect_id}/fail",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -306,6 +650,14 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "generate_scenarios",
+    "method": "POST",
+    "path": "/continuity/scenarios/generate",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "get_artifact_bytes",
     "method": "GET",
     "path": "/artifacts/{key}",
@@ -319,6 +671,22 @@ export const ORCH8_ROUTES = [
     "path": "/tenants/{tenant_id}/circuit-breakers/{handler}",
     "tags": [
       "crate::circuit_breakers"
+    ]
+  },
+  {
+    "operationId": "get_compensation_run",
+    "method": "GET",
+    "path": "/continuity/compensations/{id}",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "get_continuity_checkpoint",
+    "method": "GET",
+    "path": "/continuity/executions/{id}/checkpoints/{checkpoint_id}",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -354,11 +722,35 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "get_execution",
+    "method": "GET",
+    "path": "/continuity/executions/{id}",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "get_execution_tree",
     "method": "GET",
     "path": "/instances/{id}/tree",
     "tags": [
       "instances"
+    ]
+  },
+  {
+    "operationId": "get_explanation",
+    "method": "GET",
+    "path": "/instances/{id}/explain",
+    "tags": [
+      "instances"
+    ]
+  },
+  {
+    "operationId": "get_handoff",
+    "method": "GET",
+    "path": "/continuity/handoffs/{id}",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -386,11 +778,27 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "get_job",
+    "method": "GET",
+    "path": "/jobs/{id}",
+    "tags": [
+      "jobs"
+    ]
+  },
+  {
     "operationId": "get_latest_checkpoint",
     "method": "GET",
     "path": "/instances/{id}/checkpoints/latest",
     "tags": [
       "instances"
+    ]
+  },
+  {
+    "operationId": "get_live_migration",
+    "method": "GET",
+    "path": "/continuity/migrations/{id}",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -410,11 +818,35 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "get_prompt",
+    "method": "GET",
+    "path": "/prompts/{name}",
+    "tags": [
+      "prompts"
+    ]
+  },
+  {
+    "operationId": "get_prompt_version",
+    "method": "GET",
+    "path": "/prompts/{name}/versions/{version}",
+    "tags": [
+      "prompts"
+    ]
+  },
+  {
     "operationId": "get_release",
     "method": "GET",
     "path": "/releases/{id}",
     "tags": [
       "releases"
+    ]
+  },
+  {
+    "operationId": "get_rule",
+    "method": "GET",
+    "path": "/alerts/rules/{id}",
+    "tags": [
+      "alerts"
     ]
   },
   {
@@ -490,11 +922,27 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "handoff_preview",
+    "method": "POST",
+    "path": "/continuity/executions/{id}/handoff-preview",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "heartbeat_task",
     "method": "POST",
     "path": "/workers/tasks/{id}/heartbeat",
     "tags": [
       "workers"
+    ]
+  },
+  {
+    "operationId": "import_capsule",
+    "method": "POST",
+    "path": "/continuity/capsules/import",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -509,6 +957,14 @@ export const ORCH8_ROUTES = [
     "operationId": "ingest_event",
     "method": "POST",
     "path": "/events",
+    "tags": [
+      "events"
+    ]
+  },
+  {
+    "operationId": "ingest_event_batch",
+    "method": "POST",
+    "path": "/events/batch",
     "tags": [
       "events"
     ]
@@ -538,6 +994,22 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "issue_continuation_grant",
+    "method": "POST",
+    "path": "/continuity/grants",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "list_alerts",
+    "method": "GET",
+    "path": "/budgets/alerts",
+    "tags": [
+      "budgets"
+    ]
+  },
+  {
     "operationId": "list_all_breakers",
     "method": "GET",
     "path": "/circuit-breakers",
@@ -562,6 +1034,14 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "list_budgets",
+    "method": "GET",
+    "path": "/budgets",
+    "tags": [
+      "budgets"
+    ]
+  },
+  {
     "operationId": "list_changes",
     "method": "GET",
     "path": "/changes",
@@ -583,6 +1063,14 @@ export const ORCH8_ROUTES = [
     "path": "/workers/{worker_id}/commands",
     "tags": [
       "workers"
+    ]
+  },
+  {
+    "operationId": "list_continuity_checkpoints",
+    "method": "GET",
+    "path": "/continuity/executions/{id}/checkpoints",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -626,11 +1114,35 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "list_effects",
+    "method": "GET",
+    "path": "/continuity/executions/{id}/effects",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "list_evaluations",
+    "method": "GET",
+    "path": "/continuity/executions/{id}/evaluations",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "list_events",
     "method": "GET",
     "path": "/events",
     "tags": [
       "events"
+    ]
+  },
+  {
+    "operationId": "list_execution_budget_reservations",
+    "method": "GET",
+    "path": "/continuity/executions/{id}/budget-reservations",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -658,11 +1170,51 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "list_instance_effects",
+    "method": "GET",
+    "path": "/instances/{id}/effects",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "list_instances",
     "method": "GET",
     "path": "/instances",
     "tags": [
       "instances"
+    ]
+  },
+  {
+    "operationId": "list_invariant_results",
+    "method": "GET",
+    "path": "/continuity/executions/{id}/invariants/results",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "list_invariants",
+    "method": "GET",
+    "path": "/continuity/invariants",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "list_jobs",
+    "method": "GET",
+    "path": "/jobs",
+    "tags": [
+      "jobs"
+    ]
+  },
+  {
+    "operationId": "list_locations",
+    "method": "GET",
+    "path": "/continuity/executions/{id}/locations",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -690,6 +1242,30 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "list_profiles",
+    "method": "GET",
+    "path": "/continuity/profiles",
+    "tags": [
+      "continuity-product"
+    ]
+  },
+  {
+    "operationId": "list_prompts",
+    "method": "GET",
+    "path": "/prompts",
+    "tags": [
+      "prompts"
+    ]
+  },
+  {
+    "operationId": "list_provenance",
+    "method": "GET",
+    "path": "/continuity/executions/{id}/provenance",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "list_releases",
     "method": "GET",
     "path": "/releases",
@@ -708,9 +1284,25 @@ export const ORCH8_ROUTES = [
   {
     "operationId": "list_rules",
     "method": "GET",
+    "path": "/alerts/rules",
+    "tags": [
+      "alerts"
+    ]
+  },
+  {
+    "operationId": "list_rules",
+    "method": "GET",
     "path": "/routing-rules",
     "tags": [
       "routing"
+    ]
+  },
+  {
+    "operationId": "list_runtimes",
+    "method": "GET",
+    "path": "/runtimes",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -738,6 +1330,38 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "list_shares",
+    "method": "GET",
+    "path": "/instances/{id}/shares",
+    "tags": [
+      "instances"
+    ]
+  },
+  {
+    "operationId": "list_stream_frames",
+    "method": "GET",
+    "path": "/continuity/streams/{id}/frames",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "list_stream_windows",
+    "method": "GET",
+    "path": "/continuity/streams/{id}/windows",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "list_task_attempts",
+    "method": "GET",
+    "path": "/workers/tasks/{id}/attempts",
+    "tags": [
+      "workers"
+    ]
+  },
+  {
     "operationId": "list_tasks",
     "method": "GET",
     "path": "/workers/tasks",
@@ -759,6 +1383,14 @@ export const ORCH8_ROUTES = [
     "path": "/workers/version-pins",
     "tags": [
       "workers"
+    ]
+  },
+  {
+    "operationId": "list_what_if_runs",
+    "method": "GET",
+    "path": "/continuity/executions/{id}/what-if",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -786,6 +1418,14 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "minimize_disclosure",
+    "method": "POST",
+    "path": "/continuity/disclosure/minimize",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "next_fires",
     "method": "GET",
     "path": "/cron/{id}/next-fires",
@@ -794,11 +1434,27 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "patch_context_data",
+    "method": "PATCH",
+    "path": "/instances/{id}/context/data",
+    "tags": [
+      "instances"
+    ]
+  },
+  {
     "operationId": "pause_release",
     "method": "POST",
     "path": "/releases/{id}/pause",
     "tags": [
       "releases"
+    ]
+  },
+  {
+    "operationId": "plan_live_migration",
+    "method": "POST",
+    "path": "/continuity/migrations/plan",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -834,6 +1490,14 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "preview_compensation",
+    "method": "POST",
+    "path": "/continuity/executions/{id}/compensations/preview",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "preview_remediations",
     "method": "GET",
     "path": "/instances/{id}/remediations",
@@ -850,11 +1514,27 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "protocol_description",
+    "method": "GET",
+    "path": "/continuity/protocol",
+    "tags": [
+      "continuity-product"
+    ]
+  },
+  {
     "operationId": "prune_checkpoints",
     "method": "POST",
     "path": "/instances/{id}/checkpoints/prune",
     "tags": [
       "instances"
+    ]
+  },
+  {
+    "operationId": "public_progress",
+    "method": "GET",
+    "path": "/public/progress/{token}",
+    "tags": [
+      "public"
     ]
   },
   {
@@ -866,11 +1546,51 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "purge_llm_cache",
+    "method": "DELETE",
+    "path": "/llm-cache",
+    "tags": [
+      "usage"
+    ]
+  },
+  {
+    "operationId": "push_prompt",
+    "method": "POST",
+    "path": "/prompts",
+    "tags": [
+      "prompts"
+    ]
+  },
+  {
     "operationId": "readiness",
     "method": "GET",
     "path": "/health/ready",
     "tags": [
       "health"
+    ]
+  },
+  {
+    "operationId": "recommend_optimizations",
+    "method": "POST",
+    "path": "/continuity/optimizations/recommend",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "reconcile_execution_budget",
+    "method": "POST",
+    "path": "/continuity/executions/{id}/budget-reservations/{reservation_id}/reconcile",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "record_provenance_boundary",
+    "method": "POST",
+    "path": "/continuity/executions/{id}/provenance",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -890,6 +1610,54 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "register_runtime",
+    "method": "POST",
+    "path": "/runtimes/register",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "reject_handoff",
+    "method": "POST",
+    "path": "/continuity/handoffs/{id}/reject",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "release_execution_budget",
+    "method": "POST",
+    "path": "/continuity/executions/{id}/budget-reservations/{reservation_id}/release",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "render_badge",
+    "method": "POST",
+    "path": "/continuity/conformance/badge",
+    "tags": [
+      "continuity-product"
+    ]
+  },
+  {
+    "operationId": "reproduce_incident",
+    "method": "POST",
+    "path": "/continuity/scenarios/reproduce",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "reserve_execution_budget",
+    "method": "POST",
+    "path": "/continuity/executions/{id}/budget-reservations",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "reset_breaker",
     "method": "POST",
     "path": "/tenants/{tenant_id}/circuit-breakers/{handler}/reset",
@@ -898,11 +1666,59 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "resolve_effect",
+    "method": "POST",
+    "path": "/continuity/effects/{id}/resolve",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "resolve_prompt",
+    "method": "GET",
+    "path": "/prompts/{name}/resolve",
+    "tags": [
+      "prompts"
+    ]
+  },
+  {
+    "operationId": "resume_external_handoff",
+    "method": "POST",
+    "path": "/continuity/handoffs/{id}/resume-external",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "resume_from_block",
     "method": "POST",
     "path": "/instances/{id}/resume-from/{block_id}",
     "tags": [
       "instances"
+    ]
+  },
+  {
+    "operationId": "resume_handoff",
+    "method": "POST",
+    "path": "/continuity/handoffs/{id}/resume",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "retarget_trigger",
+    "method": "PATCH",
+    "path": "/triggers/{slug}/target",
+    "tags": [
+      "triggers"
+    ]
+  },
+  {
+    "operationId": "retract_stream_frames",
+    "method": "POST",
+    "path": "/continuity/streams/{id}/retract",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -922,11 +1738,51 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "revoke_handoff",
+    "method": "POST",
+    "path": "/continuity/handoffs/{id}/revoke",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "revoke_share",
+    "method": "DELETE",
+    "path": "/instances/{id}/share/{share_id}",
+    "tags": [
+      "instances"
+    ]
+  },
+  {
+    "operationId": "rollback_live_migration",
+    "method": "POST",
+    "path": "/continuity/migrations/{id}/rollback",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
     "operationId": "rollback_release",
     "method": "POST",
     "path": "/releases/{id}/rollback",
     "tags": [
       "releases"
+    ]
+  },
+  {
+    "operationId": "run_fault_lab",
+    "method": "POST",
+    "path": "/continuity/fault-lab/run",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "run_what_if",
+    "method": "POST",
+    "path": "/continuity/executions/{id}/what-if",
+    "tags": [
+      "continuity"
     ]
   },
   {
@@ -954,11 +1810,35 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "set_prompt_label",
+    "method": "PUT",
+    "path": "/prompts/{name}/labels/{label}",
+    "tags": [
+      "prompts"
+    ]
+  },
+  {
     "operationId": "set_version_pin",
     "method": "POST",
     "path": "/workers/version-pins",
     "tags": [
       "workers"
+    ]
+  },
+  {
+    "operationId": "sign_federation",
+    "method": "POST",
+    "path": "/continuity/federation/sign",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "slack_interaction",
+    "method": "POST",
+    "path": "/approvals/slack/interactions",
+    "tags": [
+      "approvals"
     ]
   },
   {
@@ -994,6 +1874,14 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "update_budget",
+    "method": "PUT",
+    "path": "/budgets/{id}",
+    "tags": [
+      "budgets"
+    ]
+  },
+  {
     "operationId": "update_context",
     "method": "PATCH",
     "path": "/instances/{id}/context",
@@ -1015,6 +1903,14 @@ export const ORCH8_ROUTES = [
     "path": "/pools/{pool_id}/resources/{resource_id}",
     "tags": [
       "pools"
+    ]
+  },
+  {
+    "operationId": "update_rule",
+    "method": "PUT",
+    "path": "/alerts/rules/{id}",
+    "tags": [
+      "alerts"
     ]
   },
   {
@@ -1042,11 +1938,75 @@ export const ORCH8_ROUTES = [
     ]
   },
   {
+    "operationId": "upload_task_artifact",
+    "method": "POST",
+    "path": "/workers/tasks/{id}/artifacts/{upload_id}",
+    "tags": [
+      "workers"
+    ]
+  },
+  {
+    "operationId": "validate_commercial_plan",
+    "method": "POST",
+    "path": "/continuity/commercial/validate",
+    "tags": [
+      "continuity-product"
+    ]
+  },
+  {
+    "operationId": "validate_gateway",
+    "method": "POST",
+    "path": "/continuity/gateways/validate",
+    "tags": [
+      "continuity-product"
+    ]
+  },
+  {
+    "operationId": "validate_offer",
+    "method": "POST",
+    "path": "/continuity/offers/validate",
+    "tags": [
+      "continuity-product"
+    ]
+  },
+  {
     "operationId": "validate_release",
     "method": "POST",
     "path": "/releases/{id}/validate",
     "tags": [
       "releases"
+    ]
+  },
+  {
+    "operationId": "verify_compensation_step",
+    "method": "POST",
+    "path": "/continuity/compensations/{id}/steps/{effect_id}/verify",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "verify_federation",
+    "method": "POST",
+    "path": "/continuity/federation/verify",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "verify_provenance",
+    "method": "GET",
+    "path": "/continuity/executions/{id}/provenance/verify",
+    "tags": [
+      "continuity"
+    ]
+  },
+  {
+    "operationId": "verify_receipt",
+    "method": "POST",
+    "path": "/continuity/receipts/verify",
+    "tags": [
+      "continuity-product"
     ]
   }
 ] as const;
