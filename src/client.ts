@@ -70,6 +70,7 @@ import type {
   HeartbeatResponse,
 } from "./types.js";
 import { ContinuityClient } from "./continuity.js";
+import { JobsClient } from "./jobs.js";
 
 export type HttpMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -94,6 +95,9 @@ export class Orch8Client {
   private readonly timeoutMs: number;
   private readonly onRequest?: (event: RequestEvent) => void;
   private readonly onResponse?: (event: ResponseEvent) => void;
+  private readonly fetchImpl?: typeof fetch;
+  /** Background jobs (`/jobs`). */
+  public readonly jobs: JobsClient;
   /** Portable-continuity, policy, simulation, and federation operations. */
   public readonly continuity: ContinuityClient;
 
@@ -109,7 +113,9 @@ export class Orch8Client {
     this.timeoutMs = config.timeoutMs ?? 30_000;
     this.onRequest = config.onRequest;
     this.onResponse = config.onResponse;
+    this.fetchImpl = config.fetch;
     this.continuity = new ContinuityClient(this);
+    this.jobs = new JobsClient(this);
   }
 
   // ---------------------------------------------------------------------------
@@ -159,7 +165,8 @@ export class Orch8Client {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
         try {
-          const res = await fetch(`${this.baseUrl}${path}`, {
+          const doFetch = this.fetchImpl ?? fetch;
+          const res = await doFetch(`${this.baseUrl}${path}`, {
             method: normalizedMethod,
             headers: await this.buildHeaders(),
             body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -477,7 +484,7 @@ export class Orch8Client {
       Accept: "text/event-stream",
       ...(options.lastEventId ? { "Last-Event-ID": options.lastEventId } : {}),
     });
-    const res = await fetch(`${this.baseUrl}${path}`, {
+    const res = await (this.fetchImpl ?? fetch)(`${this.baseUrl}${path}`, {
       method: "GET",
       headers,
       signal: options.signal,

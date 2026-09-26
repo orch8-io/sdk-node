@@ -18,6 +18,11 @@ export interface Orch8ClientConfig {
   onRequest?: (event: RequestEvent) => void;
   /** Called after every HTTP attempt. Observer errors are ignored. */
   onResponse?: (event: ResponseEvent) => void;
+  /**
+   * Fetch implementation used for every request. Defaults to the global
+   * `fetch`. Useful for tests (see `@orch8.io/sdk/testing`) and custom agents.
+   */
+  fetch?: typeof fetch;
 }
 
 export interface RetryConfig {

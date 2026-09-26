@@ -118,6 +118,51 @@ const client = new Orch8Client({
 });
 ```
 
+## Background jobs
+
+`client.jobs` wraps the engine's background-jobs API (`/jobs`). A job is a
+single durable step dispatched to a worker handler, with retries, delays,
+priorities, and idempotent enqueue:
+
+```typescript
+const job = await client.jobs.enqueue(
+  "send-email",
+  { to: "buyer@example.com", template: "welcome" },
+  {
+    queue: "emails",
+    delayMs: 60_000,                 // or runAt: new Date(...)
+    retry: { max_attempts: 5, initial_backoff_ms: 1_000, max_backoff_ms: 60_000 },
+    idempotencyKey: `welcome:${userId}`, // re-enqueue returns the same job
+  },
+);
+
+const done = await client.jobs.waitFor(job.id, { timeoutMs: 120_000 });
+if (done.status !== "completed") console.error(done.error);
+
+for await (const page of client.jobs.list({ status: "dead_lettered", limit: 100 })) {
+  for (const j of page.items) await client.jobs.cancel(j.id);
+}
+```
+
+`list()` yields pages and follows `next_cursor`; `listAll()` yields individual
+jobs. `waitFor()` resolves on any terminal status (`completed`, `failed`,
+`cancelled`, `dead_lettered`) and throws `JobWaitTimeoutError` on timeout.
+
+Jobs need no special worker: the job's step is an ordinary worker task for
+`handler`, so an existing `Orch8Worker` that registers `"send-email"` runs it,
+receiving the job payload as `task.params`:
+
+```typescript
+new Orch8Worker({
+  client,
+  workerId: "emails-1",
+  handlers: { "send-email": async (task) => sendEmail(task.params) },
+});
+```
+
+> The `/jobs` routes require an engine release that ships the background-jobs
+> API; older engines return 404.
+
 ## Worker
 
 Run a polling worker using `x-api-key` and `x-tenant-id` authentication:

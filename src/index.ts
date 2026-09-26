@@ -1,4 +1,18 @@
 export { Orch8Client, Orch8Error } from "./client.js";
+export {
+  JobsClient,
+  JobWaitTimeoutError,
+  TERMINAL_JOB_STATUSES,
+  isTerminalJobStatus,
+  type Job,
+  type JobDetail,
+  type JobStatus,
+  type JobRetryPolicy,
+  type EnqueueJobOptions,
+  type EnqueueJobRequest,
+  type ListJobsFilter,
+  type WaitForJobOptions,
+} from "./jobs.js";
 export { ContinuityClient, type JsonObject, type QueryValue } from "./continuity.js";
 export { Orch8Worker, type WorkerConfig, type HandlerFn, type WorkerRuntimeStats } from "./worker.js";
 export { WorkflowBuilder, workflow, type StepOptions } from "./builder.js";
