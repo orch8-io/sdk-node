@@ -316,7 +316,12 @@ export class FakeOrch8Server {
     const actual = typeof address === "object" && address ? address.port : port;
     return {
       url: `http://127.0.0.1:${actual}`,
-      close: () => new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve()))),
+      close: () => new Promise<void>((resolve, reject) => {
+        server.close((e) => (e ? reject(e) : resolve()));
+        // Node 18 keeps idle keep-alive sockets open, so close() would wait
+        // for their timeout; Node 19+ drops them on its own.
+        server.closeAllConnections?.();
+      }),
     };
   }
 

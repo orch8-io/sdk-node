@@ -31,7 +31,10 @@ async function serve(app: express.Express) {
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
   const { port } = server.address() as AddressInfo;
-  return { url: `http://127.0.0.1:${port}`, close: () => new Promise((r) => server.close(r)) };
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise((r) => { server.close(r); server.closeAllConnections?.(); }),
+  };
 }
 
 describe("express middleware", () => {
