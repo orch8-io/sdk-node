@@ -1,16 +1,17 @@
-# @orch8/sdk
+# @orch8.io/sdk
 
 Node.js SDK for the [Orch8](https://orch8.io) workflow engine.
 
 ## Installation
 
 ```bash
-npm install @orch8/sdk
+npm install @orch8.io/sdk
 ```
 
 Requires Node.js 18+.
 
-Version 0.7 supports the Orch8 0.7 sequence contract, including sagas,
+SDK version 0.7.x targets the Orch8 engine 0.7.x API (`ORCH8_API_VERSION`
+`1.0.0`) and sequence schema version 1, including sagas,
 conditional steps, filtered retries, output schemas, local-time delays, and
 bounded loop history. Portable continuity APIs are available under
 `client.continuity`.
@@ -18,7 +19,7 @@ bounded loop history. Portable continuity APIs are available under
 ## Quick Start
 
 ```typescript
-import { Orch8Client } from "@orch8/sdk";
+import { Orch8Client } from "@orch8.io/sdk";
 
 const client = new Orch8Client({
   baseUrl: "https://api.orch8.io",
@@ -168,7 +169,7 @@ external effects. `stop()` waits up to 30 seconds for executing handlers.
 ## Error Handling
 
 ```typescript
-import { Orch8Error } from "@orch8/sdk";
+import { Orch8Error } from "@orch8.io/sdk";
 
 try {
   await client.getInstance("non-existent");
