@@ -84,6 +84,41 @@ describe("worker wire protocol", () => {
     }
   });
 
+  it("stops heartbeating and never acknowledges after a 409 heartbeat (lease lost)", async () => {
+    let finish!: (output: unknown) => void;
+    const handler = vi.fn(() => new Promise<unknown>((resolve) => { finish = resolve; }));
+    const paths: string[] = [];
+    let polled = false;
+    fetchMock.mockImplementation(async (url) => {
+      const path = String(url);
+      paths.push(path);
+      if (path.endsWith("/poll")) {
+        const body = polled ? { ...envelope, tasks: [] } : envelope;
+        polled = true;
+        return response(body);
+      }
+      if (path.endsWith("/heartbeat")) return response({ error: "stale claim" }, 409);
+      return response({});
+    });
+    const worker = new Orch8Worker({
+      engineUrl: "http://engine", workerId: "phone-1", handlers: { inspect: handler }, pollIntervalMs: 100,
+    });
+    try {
+      await worker.start();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(paths.filter((p) => p.endsWith("/heartbeat"))).toHaveLength(1);
+      finish({ done: true });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(paths.some((p) => p.endsWith("/complete") || p.endsWith("/fail"))).toBe(false);
+      expect(worker.stats().inFlight).toBe(0);
+    } finally {
+      finish?.({});
+      const stopping = worker.stop();
+      await vi.advanceTimersByTimeAsync(30000);
+      await stopping;
+    }
+  });
+
   it("surfaces a server conflict to direct callers", async () => {
     fetchMock.mockImplementation(async () => response({ error: "stale claim" }, 409));
     const client = new Orch8Client({ baseUrl: "http://engine" });
@@ -101,7 +136,7 @@ describe("worker wire protocol", () => {
     await vi.advanceTimersByTimeAsync(0);
     const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/fail"));
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({
-      worker_id: "phone-1", claim_epoch: 7, message: "invalid input", retryable: false,
+      worker_id: "phone-1", claim_epoch: 7, message: "invalid input", retryable: true,
     });
     expect(failed).toHaveBeenCalledTimes(1);
     const stopping = worker.stop();

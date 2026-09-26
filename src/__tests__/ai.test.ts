@@ -58,7 +58,7 @@ describe("Vercel AI SDK adapter", () => {
     const tools = durableTools({ boom }, { client, wait });
     const err = await tools.boom.execute!({ b: 1, a: 2 }, { toolCallId: "" }).catch((e) => e);
     expect(err).toBeInstanceOf(DurableToolError);
-    expect(err.status).toBe("failed");
+    expect(err.status).toBe("dead_lettered"); // uncaught errors are retried, then dead-lettered
     const key = engine.requests.find((r) => r.path === "/jobs")?.body as { idempotency_key: string };
     expect(key.idempotency_key).toMatch(/^ai:boom:sha256-[0-9a-f]{32}$/);
   });

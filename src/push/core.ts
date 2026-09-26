@@ -206,7 +206,8 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number | null): Pr
 /**
  * Run one claimed task and acknowledge it with the task's `claim_epoch`,
  * following the same rules as `Orch8Worker`: handler errors become `fail`
- * (retryable only when the error says so); a rejected acknowledgement is
+ * (retryable unless the error says otherwise; a missing handler is not
+ * retryable); a rejected acknowledgement is
  * reported, never converted into a contradictory failure.
  */
 export async function runClaimedTask(
@@ -223,9 +224,10 @@ export async function runClaimedTask(
     output = await withTimeout(handler(task), task.timeout_ms);
   } catch (err) {
     const message = errorMessage(err);
-    const retryable = handler !== undefined && err instanceof Error && "retryable" in err
-      ? Boolean((err as { retryable?: unknown }).retryable)
-      : false;
+    const retryable = handler === undefined ? false
+      : err instanceof Error && "retryable" in err
+        ? Boolean((err as { retryable?: unknown }).retryable)
+        : true;
     try {
       await client.failTask(task.id, {
         worker_id: workerId,

@@ -358,7 +358,7 @@ describe("Orch8Worker", () => {
       );
       expect(failCall).toBeDefined();
       expect(failCall![1].body).toContain("boom");
-      expect(failCall![1].body).toContain('"retryable":false');
+      expect(failCall![1].body).toContain('"retryable":true');
 
       await stopWorker(worker);
     });

@@ -1,5 +1,5 @@
 import type { WorkerTask } from "./types.js";
-import { Orch8Client } from "./client.js";
+import { Orch8Client, Orch8Error } from "./client.js";
 
 export type HandlerFn = (task: WorkerTask) => Promise<unknown>;
 
@@ -60,6 +60,8 @@ export class Orch8Worker {
   private readonly client: Orch8Client;
   private pollHints = new Map<string, number>();
   private heartbeatIntervals = new Map<string, number>();
+  /** Claims whose lease was lost (heartbeat 404/409); never acknowledged. */
+  private lostTasks = new Set<string>();
   private running = false;
   private pollTimers = new Map<string, NodeJS.Timeout>();
   private heartbeatTimer: NodeJS.Timeout | null = null;
@@ -222,12 +224,16 @@ export class Orch8Worker {
         output = await this.withTimeout(handler(task), task.timeout_ms);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        // Uncaught errors are transient unless explicitly flagged otherwise.
         const retryable = err instanceof Error && "retryable" in err
-          ? Boolean(err.retryable) : false;
+          ? Boolean(err.retryable) : true;
+        if (this.lostTasks.has(task.id)) return;
         await this.failTask(task, message, retryable);
         this.notify(() => this.config.onTaskFail?.(task, message));
         return;
       }
+      // A lost lease cannot be acknowledged; the engine already reclaimed it.
+      if (this.lostTasks.has(task.id)) return;
       // A rejected or ambiguous acknowledgement is not a handler failure.
       await this.completeTask(task, output);
       this.notify(() => this.config.onTaskComplete?.(task, output));
@@ -235,6 +241,7 @@ export class Orch8Worker {
       // Leave unacknowledged work for lease recovery; never report success.
     } finally {
       this.inFlightTasks.delete(task.id);
+      this.lostTasks.delete(task.id);
       this.concurrencySemaphore++;
     }
   }
@@ -288,10 +295,17 @@ export class Orch8Worker {
   }
 
   private async sendHeartbeats(): Promise<void> {
+    const live = Array.from(this.inFlightTasks.values()).filter((t) => !this.lostTasks.has(t.id));
     await Promise.allSettled(
-      Array.from(this.inFlightTasks.values(), (task) => this.client.heartbeatTask(task.id, {
+      live.map((task) => this.client.heartbeatTask(task.id, {
         worker_id: this.config.workerId,
         claim_epoch: task.claim_epoch,
+      }).catch((err: unknown) => {
+        // 404/409: the lease is gone. Stop heartbeating and never ack this claim.
+        if (err instanceof Orch8Error && (err.status === 404 || err.status === 409)) {
+          this.lostTasks.add(task.id);
+        }
+        throw err;
       })),
     );
   }
