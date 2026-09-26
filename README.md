@@ -274,6 +274,70 @@ export default createCloudflarePushHandler((env: Env) => ({
 receivers. Signature checks need the raw body bytes; do not re-serialize parsed
 JSON. Keep handlers well inside your platform's function timeout.
 
+## Testing
+
+`@orch8.io/sdk/testing` provides two in-process environments.
+
+**`FakeOrch8Server`** is a pure-TypeScript engine double for unit-testing
+workers with Vitest or Jest. It implements the worker protocol (poll, queue
+poll, complete, fail, heartbeat and checkpoint compare-and-swap, claim epochs,
+leases), instance CRUD/signals/outputs, and the jobs API on a virtual clock.
+`runUntilIdle()` skips time over delays and retry backoffs:
+
+```typescript
+import { describe, expect, it } from "vitest";
+import { Orch8Worker } from "@orch8.io/sdk";
+import { FakeOrch8Server } from "@orch8.io/sdk/testing";
+
+it("sends the welcome email after an hour", async () => {
+  const engine = new FakeOrch8Server();
+  const client = engine.client();          // Orch8Client backed by the fake, no network
+  const job = await client.jobs.enqueue("send-email", { to: "a@b.c" }, { delayMs: 3_600_000 });
+
+  await engine.runUntilIdle({ "send-email": async (task) => ({ sent: true }) });
+
+  expect((await client.jobs.get(job.id)).status).toBe("completed");
+});
+
+it("runs a real worker against enqueued tasks", async () => {
+  const engine = new FakeOrch8Server();
+  const task = engine.enqueueTask({ handler_name: "greet", params: { name: "Ada" } });
+  const worker = new Orch8Worker({
+    client: engine.client(),
+    workerId: "w-1",
+    pollIntervalMs: 5,
+    handlers: { greet: async (t) => ({ hi: t.params }) },
+  });
+  await worker.start();
+  expect((await engine.waitForTask(task.id)).state).toBe("completed");
+  await worker.stop();
+});
+```
+
+`engine.advanceTime(ms)` moves the clock by hand (expiring leases whose
+heartbeats lapsed), `engine.requests` records every call, and
+`engine.listen()` serves the same fake over real HTTP for code that cannot take
+an injected client. Every `Orch8Client` also accepts a `fetch` option.
+
+**`NativeTestEnvironment`** runs whole sequences in the engine's Rust core via
+the optional peer dependency `@orch8/engine-native` (napi bindings from the
+engine repo, `packages/node-native`). Delays and backoffs run on virtual time:
+
+```typescript
+import { workflow } from "@orch8.io/sdk";
+import { createNativeTestEnvironment } from "@orch8.io/sdk/testing";
+
+const env = await createNativeTestEnvironment(); // throws a clear error if not installed
+const seq = workflow("reminder").delay({ duration: 3 * 86_400_000 }).build();
+const result = await env.run(seq, { user_id: "u1" });
+expect(result.state).toBe("completed");
+```
+
+The native runner executes built-in handlers in dry-run mode and auto-approves
+human steps. It does not call your external worker handlers; a run that needs
+one (or a signal) returns with `state: "waiting"`. Use `FakeOrch8Server` for
+worker logic.
+
 ## Error Handling
 
 ```typescript

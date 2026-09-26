@@ -29,6 +29,16 @@
         "default": "./dist/push/index.js"
       }
     },
+    "./testing": {
+      "import": {
+        "types": "./dist/testing/index.d.ts",
+        "default": "./dist/testing/index.js"
+      },
+      "require": {
+        "types": "./dist/testing/index.d.ts",
+        "default": "./dist/testing/index.js"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -59,6 +69,14 @@
   "license": "MIT",
   "dependencies": {
     "zod": "^3.23.0"
+  },
+  "peerDependencies": {
+    "@orch8/engine-native": ">=0.7.1"
+  },
+  "peerDependenciesMeta": {
+    "@orch8/engine-native": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "typescript": "^5.4.0",
