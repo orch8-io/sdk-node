@@ -1,0 +1,122 @@
+import { SchemaConverter, jsdoc, pascalCase, propertyKey, type JsonSchema } from "./schema-to-ts.js";
+
+export const TYPEGEN_VERSION = "orch8-typegen-v1";
+
+export interface GenerateOptions {
+  /** Type-name prefix. Default: PascalCase of the sequence `name`. */
+  typePrefix?: string;
+}
+
+export interface StepContract {
+  id: string;
+  handler: string;
+  outputSchema?: JsonSchema;
+}
+
+/**
+ * Collect every `type: "step"` block in document order, including steps nested
+ * in parallel/race/loop/for_each/router/try_catch/saga/ab_split/cancellation
+ * scopes. Duplicate ids keep the first occurrence.
+ */
+export function collectSteps(sequence: unknown): StepContract[] {
+  const steps: StepContract[] = [];
+  const seen = new Set<string>();
+  const visit = (node: unknown, depth: number): void => {
+    if (depth > 256 || node === null || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child, depth + 1);
+      return;
+    }
+    const obj = node as Record<string, unknown>;
+    if (obj.type === "step" && typeof obj.id === "string" && typeof obj.handler === "string") {
+      if (!seen.has(obj.id)) {
+        seen.add(obj.id);
+        steps.push({
+          id: obj.id,
+          handler: obj.handler,
+          ...(obj.output_schema !== undefined ? { outputSchema: obj.output_schema as JsonSchema } : {}),
+        });
+      }
+    }
+    for (const [key, value] of Object.entries(obj)) {
+      // Schemas and params are data, not blocks.
+      if (key === "output_schema" || key === "input_schema" || key === "params") continue;
+      visit(value, depth + 1);
+    }
+  };
+  visit((sequence as Record<string, unknown>)?.blocks ?? [], 0);
+  return steps;
+}
+
+/**
+ * Generate TypeScript declarations for a sequence's typed IO contracts:
+ * `<P>Input` from `input_schema`, `<P><Step>Output` per step `output_schema`,
+ * a `<P>StepOutputs` map (steps without a schema are `unknown`), a
+ * `<P>StepId` union, and a `<P>Handlers` map from handler name to step ids.
+ * Output is a pure function of the schemas: no timestamps, sorted keys.
+ */
+export function generateSequenceTypes(sequence: Record<string, unknown>, options: GenerateOptions = {}): string {
+  const name = typeof sequence.name === "string" ? sequence.name : "sequence";
+  const prefix = options.typePrefix ?? pascalCase(name);
+  const taken = new Set<string>();
+  const decls: string[] = [];
+  const reserve = (candidate: string): string => {
+    let n = candidate;
+    for (let i = 2; taken.has(n); i += 1) n = `${candidate}${i}`;
+    taken.add(n);
+    return n;
+  };
+
+  const emit = (typeName: string, schema: JsonSchema | undefined, doc: string): void => {
+    if (schema === undefined) {
+      decls.push(`${doc}export type ${typeName} = unknown;`);
+      return;
+    }
+    const conv = new SchemaConverter(schema, typeName, taken);
+    const body = conv.convert();
+    const docText = doc || (typeof schema === "object" ? jsdoc(schema, "") : "");
+    decls.push(`${docText}export type ${typeName} = ${body};`);
+    for (const [defName, defBody] of conv.definitions) decls.push(`export type ${defName} = ${defBody};`);
+  };
+
+  const inputName = reserve(`${prefix}Input`);
+  const stepOutputsName = reserve(`${prefix}StepOutputs`);
+  const stepIdName = reserve(`${prefix}StepId`);
+  const handlersName = reserve(`${prefix}Handlers`);
+
+  emit(inputName, sequence.input_schema as JsonSchema | undefined, "/** Instance input (`context.data`), from `input_schema`. */\n");
+
+  const steps = collectSteps(sequence);
+  const outputTypes = new Map<string, string>();
+  for (const step of steps) {
+    if (step.outputSchema === undefined) continue;
+    const typeName = reserve(`${prefix}${pascalCase(step.id)}Output`);
+    outputTypes.set(step.id, typeName);
+    emit(typeName, step.outputSchema, `/** Output of step \`${step.id}\` (handler \`${step.handler}\`). */\n`);
+  }
+
+  const mapLines = steps.map((s) => `  ${propertyKey(s.id)}: ${outputTypes.get(s.id) ?? "unknown"};`);
+  decls.push(
+    `/** Step id → output type. Steps without \`output_schema\` are \`unknown\`. */\n` +
+      (mapLines.length ? `export interface ${stepOutputsName} {\n${mapLines.join("\n")}\n}` : `export type ${stepOutputsName} = Record<string, never>;`),
+  );
+  decls.push(`export type ${stepIdName} = keyof ${stepOutputsName};`);
+
+  const byHandler = new Map<string, string[]>();
+  for (const s of steps) byHandler.set(s.handler, [...(byHandler.get(s.handler) ?? []), s.id]);
+  const handlerLines = [...byHandler.keys()].sort().map((h) => {
+    const ids = byHandler.get(h)!.map((id) => JSON.stringify(id)).join(" | ");
+    return `  ${propertyKey(h)}: ${ids};`;
+  });
+  decls.push(
+    `/** Worker handler name → step ids it serves. */\n` +
+      (handlerLines.length ? `export interface ${handlersName} {\n${handlerLines.join("\n")}\n}` : `export type ${handlersName} = Record<string, never>;`),
+  );
+
+  const header = [
+    `// Generated by ${TYPEGEN_VERSION} from sequence ${JSON.stringify(name)}. Do not edit.`,
+    "/* eslint-disable */",
+    "",
+  ].join("\n");
+  return `${header}\n${decls.join("\n\n")}\n`;
+}

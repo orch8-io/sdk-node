@@ -4,6 +4,9 @@
   "description": "Node.js SDK for Orch8 workflow engine",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "orch8-typegen": "dist/typegen/cli.js"
+  },
   "sideEffects": false,
   "engines": {
     "node": ">=18"
@@ -37,6 +40,16 @@
       "require": {
         "types": "./dist/testing/index.d.ts",
         "default": "./dist/testing/index.js"
+      }
+    },
+    "./typegen": {
+      "import": {
+        "types": "./dist/typegen/index.d.ts",
+        "default": "./dist/typegen/index.js"
+      },
+      "require": {
+        "types": "./dist/typegen/index.d.ts",
+        "default": "./dist/typegen/index.js"
       }
     },
     "./package.json": "./package.json"

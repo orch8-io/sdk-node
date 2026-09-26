@@ -211,6 +211,37 @@ A lease does not authorize offline execution. Handlers are not forcibly cancelle
 on lease loss or timeout; use bounded work and provider idempotency keys for
 external effects. `stop()` waits up to 30 seconds for executing handlers.
 
+## Typed step IO (`orch8-typegen`)
+
+`orch8-typegen` turns a sequence file's JSON Schema contracts into TypeScript:
+`<Name>Input` from `input_schema`, `<Name><Step>Output` for every step
+`output_schema` (including steps nested in parallel, loop, router, saga, ...
+blocks), a `<Name>StepOutputs` map, a `<Name>StepId` union, and a
+`<Name>Handlers` map from handler name to step ids. Output is deterministic:
+no timestamps, sorted keys, stable names, so it can be committed and checked in
+CI.
+
+```bash
+npx orch8-typegen sequences/checkout.json --out src/generated/checkout.ts
+npx orch8-typegen sequences/checkout.json --out src/generated/checkout.ts --check  # CI: exit 1 on drift
+```
+
+```typescript
+import type { CheckoutFlowInput, CheckoutFlowChargeOutput } from "./generated/checkout.js";
+
+const handlers = {
+  "payments.charge": async (task): Promise<CheckoutFlowChargeOutput> => { /* ... */ },
+};
+await client.createInstance({ sequence_id, context: { data: input satisfies CheckoutFlowInput } });
+```
+
+With `--remote`, the engine's typed-dataflow compiler does the work instead
+(`POST /sequences/dataflow` for a file, `GET /sequences/{id}/dataflow` with
+`--id`). Findings are printed, the command exits 1 when any finding is an
+error, and the engine's `orch8-dataflow-v2` TypeScript bindings are written.
+It reads `ORCH8_URL`, `ORCH8_API_KEY`, and `ORCH8_TENANT_ID`. The same
+functions are importable from `@orch8.io/sdk/typegen`.
+
 ## Push dispatch (serverless workers)
 
 A queue switched to push mode (`POST /queues/dispatch` with

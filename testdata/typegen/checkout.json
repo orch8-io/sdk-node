@@ -1,0 +1,54 @@
+{
+  "name": "checkout-flow",
+  "input_schema": {
+    "type": "object",
+    "description": "Checkout request",
+    "required": ["order_id", "items"],
+    "additionalProperties": false,
+    "properties": {
+      "order_id": { "type": "string" },
+      "items": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/line_item" }
+      },
+      "coupon": { "type": ["string", "null"] },
+      "channel": { "enum": ["web", "mobile"] }
+    },
+    "$defs": {
+      "line_item": {
+        "type": "object",
+        "required": ["sku", "qty"],
+        "additionalProperties": false,
+        "properties": { "sku": { "type": "string" }, "qty": { "type": "integer" } }
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "step",
+      "id": "charge",
+      "handler": "payments.charge",
+      "params": { "type": "step", "id": "not-a-step", "handler": "x" },
+      "output_schema": {
+        "type": "object",
+        "required": ["charge_id", "status"],
+        "properties": {
+          "charge_id": { "type": "string", "description": "Provider charge id" },
+          "status": { "const": "succeeded" },
+          "amount-cents": { "type": "integer" }
+        }
+      }
+    },
+    {
+      "type": "parallel",
+      "id": "notify",
+      "branches": [
+        [{ "type": "step", "id": "email", "handler": "send-email" }],
+        [{ "type": "step", "id": "sms", "handler": "send-sms",
+           "output_schema": { "anyOf": [{ "type": "object", "required": ["sid"], "additionalProperties": false, "properties": { "sid": { "type": "string" } } }, { "type": "null" }] } }]
+      ]
+    },
+    { "type": "step", "id": "receipt", "handler": "send-email",
+      "output_schema": { "type": "array", "prefixItems": [{ "type": "string" }, { "type": "number" }], "items": false } }
+  ]
+}
