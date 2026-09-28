@@ -1051,6 +1051,39 @@ describe("Orch8Client", () => {
   // ---- Workers (additional) -----------------------------------------------
 
   describe("Workers (additional)", () => {
+    it("createBrowserSession POSTs snake_case and returns a camelCase session", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        token: "bt_1", runtime_id: "tab-1", expires_at: "2026-09-27T12:15:00Z", handlers: ["confirm"],
+      }));
+
+      const session = await client.createBrowserSession({
+        runtimeId: "tab-1", handlers: ["confirm"], ttlSecs: 600, queues: ["ui"],
+      });
+
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe("http://localhost:8080/runtimes/browser-sessions");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(init.body)).toEqual({
+        handlers: ["confirm"], runtime_id: "tab-1", ttl_secs: 600, queues: ["ui"],
+      });
+      expect(session).toEqual({
+        token: "bt_1", runtimeId: "tab-1", expiresAt: "2026-09-27T12:15:00Z", handlers: ["confirm"],
+      });
+    });
+
+    it("createBrowserSession rejects an empty handler allowlist", async () => {
+      await expect(client.createBrowserSession({ handlers: [] })).rejects.toThrow(/at least one handler/);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("releaseTask POSTs to /workers/tasks/:id/release", async () => {
+      mockFetch.mockResolvedValueOnce(noContentResponse());
+      await client.releaseTask("task-1", { worker_id: "w", claim_epoch: 2, started: false });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe("http://localhost:8080/workers/tasks/task-1/release");
+      expect(JSON.parse(init.body)).toEqual({ worker_id: "w", claim_epoch: 2, started: false });
+    });
+
     it("listWorkerTasks GETs /workers/tasks without filter", async () => {
       const tasks = [{ id: "task-1", handler_name: "my-handler" }];
       mockFetch.mockResolvedValueOnce(jsonResponse(tasks));

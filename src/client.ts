@@ -68,6 +68,9 @@ import type {
   FailRequest,
   HeartbeatRequest,
   HeartbeatResponse,
+  ReleaseRequest,
+  CreateBrowserSessionRequest,
+  BrowserSession,
 } from "./types.js";
 import { ContinuityClient } from "./continuity.js";
 import { JobsClient } from "./jobs.js";
@@ -742,6 +745,43 @@ export class Orch8Client {
       return Promise.reject(new TypeError("checkpoint_seq is required with checkpoint"));
     }
     return this.post<HeartbeatResponse>(`/workers/tasks/${this.e(id)}/heartbeat`, body);
+  }
+
+  /**
+   * Voluntarily give a claimed task back (`started: false` returns it to
+   * `pending`; `started: true` marks a side-effecting step's receipt Unknown).
+   */
+  releaseTask(id: string, body: ReleaseRequest): Promise<void> {
+    return this.post<void>(`/workers/tasks/${this.e(id)}/release`, body);
+  }
+
+  /**
+   * Mint a short-lived browser worker token (`POST /runtimes/browser-sessions`).
+   * Call this from your application backend with an operator/admin key and
+   * hand the result to `BrowserWorker`'s `getToken`; never ship the API key to
+   * the browser. The token is bound to `kind=browser`, the runtime id and the
+   * handler allowlist, and only works on the worker task endpoints.
+   */
+  async createBrowserSession(request: CreateBrowserSessionRequest): Promise<BrowserSession> {
+    if (!Array.isArray(request.handlers) || request.handlers.length === 0) {
+      throw new TypeError("createBrowserSession requires at least one handler");
+    }
+    const body: Record<string, unknown> = { handlers: request.handlers };
+    if (request.runtimeId !== undefined) body.runtime_id = request.runtimeId;
+    if (request.ttlSecs !== undefined) body.ttl_secs = request.ttlSecs;
+    if (request.queues !== undefined) body.queues = request.queues;
+    const res = await this.post<{
+      token: string;
+      runtime_id: string;
+      expires_at: string;
+      handlers?: string[];
+    }>("/runtimes/browser-sessions", body);
+    return {
+      token: res.token,
+      runtimeId: res.runtime_id,
+      expiresAt: res.expires_at,
+      handlers: res.handlers ?? request.handlers,
+    };
   }
 
   listWorkerTasks(filter?: Record<string, string>): Promise<WorkerTask[]> {
