@@ -324,7 +324,8 @@ How it behaves:
   `assertOutputSize()` / `OutputTooLargeError` for the 1 MiB output guard (`maxOutputBytes` to change it).
 
 A complete example (HTML page, handler and backend) lives in
-[`examples/browser-worker/`](examples/browser-worker/).
+[`examples/browser-worker/`](examples/browser-worker/); the end-to-end guide to
+running steps in a user's tab is [`docs/browser-executor.md`](docs/browser-executor.md).
 
 ## Typed step IO (`orch8-typegen`)
 
@@ -419,6 +420,72 @@ export default createCloudflarePushHandler((env: Env) => ({
 `verifyPushSignature(rawBody, headers, secret)` is exported for custom
 receivers. Signature checks need the raw body bytes; do not re-serialize parsed
 JSON. Keep handlers well inside your platform's function timeout.
+
+## Serverless executors (`@orch8.io/sdk/serverless`)
+
+Push dispatch wakes a function per task. Serverless executors go the other
+way: a scheduled or on-demand invocation **pulls** a bounded batch of tasks,
+runs them inside the time it has left, and leaves no lease behind. They use
+the regular worker lease API (`poll` → `heartbeat` → `complete` | `fail` |
+`release`, echoing `claim_epoch`); no extra engine endpoints are involved.
+
+```typescript
+// AWS Lambda, triggered by an EventBridge schedule (the event is ignored)
+import { Orch8Client, createLambdaExecutor } from "@orch8.io/sdk/serverless";
+
+export const handler = createLambdaExecutor(() => ({
+  client: new Orch8Client({ baseUrl: process.env.ORCH8_URL!, headers: { "x-api-key": process.env.ORCH8_API_KEY! } }),
+  handlers: { "thumbnail.render": async (task, ctx) => render(task.params, { signal: ctx.signal }) },
+  maxTasks: 5,          // N tasks claimed per invocation
+  safetyMarginMs: 3000, // kept free before the Lambda timeout
+}));
+```
+
+```typescript
+// Cloudflare Workers: Cron Trigger + authenticated POST, fetch only (no nodejs_compat)
+import { Orch8Client, createCloudflareExecutor } from "@orch8.io/sdk/serverless";
+
+export default createCloudflareExecutor((env: Env) => ({
+  client: new Orch8Client({ baseUrl: env.ORCH8_URL, headers: { "x-api-key": env.ORCH8_API_KEY } }),
+  handlers: { "lead.enrich": async (task) => enrich(task.params) },
+  budgetMs: 25_000,                       // Workers have no remaining-time API
+  triggerSecret: env.ORCH8_TRIGGER_SECRET, // fetch trigger answers 404 without it
+}));
+```
+
+Both adapters call `drainOnce({ client, handlers, deadlineMs, ... })`, which
+you can use directly from any short-lived process (CronJob, CI, Vercel cron).
+`deadlineMs` is an absolute epoch-ms deadline by which every lease must be
+settled. Each drain:
+
+1. polls every handler (or `queueName`) with `limit` up to `maxTasks`
+   (default 10) and optional `capabilities` (Lambda advertises `kind: server`,
+   Cloudflare `kind: edge` by default), in rounds until the queue is empty,
+   `maxTasks` is reached, or less than `minTaskBudgetMs` remains;
+2. runs claimed tasks concurrently, heartbeating at the shorter of
+   `heartbeatIntervalMs` and half the lease;
+3. completes or fails each one like `Orch8Worker` (thrown errors are retryable
+   unless `err.retryable === false`; `timeout_ms` is enforced);
+4. at `deadlineMs - releaseMarginMs` (default 1 s before), aborts `ctx.signal`
+   and releases every still-running task with `started: true`, so the engine
+   re-dispatches it (and marks a side-effecting step's receipt Unknown) instead
+   of waiting for the lease to expire. A claim whose `timeout_ms` cannot fit
+   the remaining budget is released with `started: false` without running.
+   A result that arrives after its release is never acknowledged.
+
+Handlers are plain `Orch8Worker` handlers; the context additionally has
+`signal`, `deadlineMs`, `remainingMs()` and `heartbeat()`. The returned
+`DrainResult` lists every task's outcome (`completed`, `failed`, `released`,
+`released_unstarted`, `lease_lost`, `ack_rejected`) and why the drain stopped
+(`empty`, `deadline`, `max_tasks`, `poll_error`); the Cloudflare fetch trigger
+returns it as JSON (502 on `poll_error`).
+
+The `@orch8.io/sdk/serverless` module graph has no Node built-ins and
+re-exports `Orch8Client`; import from it (not the root entry) on edge runtimes.
+Handlers still must be idempotent: a released task runs again elsewhere. Full
+examples: [`examples/serverless-lambda/`](examples/serverless-lambda/) (with a
+SAM template), [`examples/serverless-cloudflare/`](examples/serverless-cloudflare/)
+(with `wrangler.toml`) and [`examples/serverless-drain/`](examples/serverless-drain/).
 
 ## Framework integrations
 

@@ -4,6 +4,17 @@
 
 ### Added
 
+- `@orch8.io/sdk/serverless`: serverless executors. `drainOnce({ client,
+  handlers, deadlineMs, maxTasks })` claims a bounded batch through the worker
+  lease API, runs it concurrently with heartbeats, and releases every lease
+  still held at `deadlineMs - releaseMarginMs` (`started: true`; claims whose
+  `timeout_ms` cannot fit are released `started: false`).
+  `createLambdaExecutor` budgets from `context.getRemainingTimeInMillis()`
+  minus `safetyMarginMs`; `createCloudflareExecutor` exposes `scheduled` and
+  a secret-guarded `fetch` trigger and uses fetch only. The entry has no Node
+  built-ins and re-exports `Orch8Client`.
+- `docs/browser-executor.md`: guide to running steps in the user's browser tab.
+
 - `Orch8Worker` `capabilities` option: advertises `RuntimeCapabilities` (kind,
   trust, hardware, regions, plugins, ...) with every poll, bound to the worker
   id with a fresh five-minute window, so the worker can claim tasks that carry
@@ -39,6 +50,9 @@
 
 ### Changed
 
+- `Orch8Client` no longer imports `node:crypto`; request ids come from the Web
+  Crypto global (Node 18 falls back to `node:crypto` lazily), so the client
+  runs on Cloudflare Workers without `nodejs_compat`.
 - `Orch8Worker` timer fields use `ReturnType<typeof setTimeout>` instead of
   `NodeJS.Timeout`.
 
