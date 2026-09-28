@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Orch8 browser worker example</title>
+    <!--
+      Serve with any bundler that resolves package exports (e.g. `npx vite`).
+      If you ship a Content-Security-Policy, allow the lease worker with
+      `worker-src blob:` — otherwise BrowserWorker falls back to the main thread.
+    -->
+  </head>
+  <body>
+    <h1 class="order-title">Order #42</h1>
+    <p id="status">Waiting for work…</p>
+
+    <form id="shipping" hidden>
+      <label>Recipient <input name="recipient" required /></label>
+      <label>Address <textarea name="address" required></textarea></label>
+      <label><input type="checkbox" name="gift" value="yes" /> Gift wrap</label>
+      <button type="submit">Confirm shipping</button>
+    </form>
+
+    <script type="module" src="./page.ts"></script>
+  </body>
+</html>
