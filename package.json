@@ -39,6 +39,16 @@
         "default": "./dist/push/index.js"
       }
     },
+    "./serverless": {
+      "import": {
+        "types": "./dist/serverless/index.d.ts",
+        "default": "./dist/serverless/index.js"
+      },
+      "require": {
+        "types": "./dist/serverless/index.d.ts",
+        "default": "./dist/serverless/index.js"
+      }
+    },
     "./testing": {
       "import": {
         "types": "./dist/testing/index.d.ts",
@@ -121,7 +131,8 @@
     "workflow",
     "orchestration",
     "sdk",
-    "browser"
+    "browser",
+    "serverless"
   ],
   "repository": {
     "type": "git",
