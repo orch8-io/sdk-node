@@ -1,6 +1,7 @@
 import type { Orch8Client } from "../client.js";
 import type { WorkerTask } from "../types.js";
 import type { HandlerFn } from "../worker.js";
+import { workerTaskContext } from "../internal/task-context.js";
 import { subtle, toHex } from "../internal/webcrypto.js";
 
 /**
@@ -221,7 +222,7 @@ export async function runClaimedTask(
   let output: unknown;
   try {
     if (!handler) throw new Error(`no handler registered for "${task.handler_name}"`);
-    output = await withTimeout(handler(task), task.timeout_ms);
+    output = await withTimeout(handler(task, workerTaskContext(task, workerId)), task.timeout_ms);
   } catch (err) {
     const message = errorMessage(err);
     const retryable = handler === undefined ? false

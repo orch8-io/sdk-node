@@ -211,6 +211,38 @@ A lease does not authorize offline execution. Handlers are not forcibly cancelle
 on lease loss or timeout; use bounded work and provider idempotency keys for
 external effects. `stop()` waits up to 30 seconds for executing handlers.
 
+Handlers receive a second argument with the task's lease facts. `effectId` is
+the server's deterministic idempotency key for the step's effect; pass it to
+downstream APIs. All three are `null` against servers that predate them:
+
+```typescript
+handlers: {
+  "charge-card": async (task, { effectId, leaseSecs, continuityEpoch }) =>
+    payments.charge(task.params, { idempotencyKey: effectId ?? task.id }),
+},
+```
+
+Steps can require a runtime with `params.$runtime` (kinds, a specific
+`runtime_id`, hardware, regions, plugins, trust). Such tasks are only handed
+to workers that advertise matching capabilities, so pass `capabilities` to
+claim them. The worker sends a fresh advertisement with every poll, bound to
+its `workerId` and valid for at most five minutes:
+
+```typescript
+new Orch8Worker({
+  client,
+  workerId: "gpu-box-1",
+  handlers,
+  capabilities: { kind: "desktop", hardware: ["cuda"], regions: ["norway"] },
+});
+```
+
+`kind` defaults to `server` and `trust` to `registered`; `handlers` defaults to
+the configured handler names. Tasks claimed while `stop()` is in progress, or
+beyond free capacity, are released at once (`POST /workers/tasks/{id}/release`
+with `started: false`) instead of waiting for lease expiry; servers without
+that endpoint fall back to lease expiry.
+
 ## Browser worker (`@orch8.io/sdk/browser`)
 
 Run step handlers inside a web page — steps that need a human, the DOM, or data

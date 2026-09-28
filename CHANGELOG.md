@@ -4,6 +4,17 @@
 
 ### Added
 
+- `Orch8Worker` `capabilities` option: advertises `RuntimeCapabilities` (kind,
+  trust, hardware, regions, plugins, ...) with every poll, bound to the worker
+  id with a fresh five-minute window, so the worker can claim tasks that carry
+  `$runtime` placement requirements.
+- Worker handlers receive a second argument, `WorkerTaskContext`
+  (`effectId`, `leaseSecs`, `continuityEpoch`, `workerId`); also exported as
+  `workerTaskContext(task, workerId)`. The push task runner passes it too.
+- `Orch8Worker` releases tasks it claimed but will not start (batch arrived
+  after `stop()`, or beyond free capacity) with `started: false`; previously
+  over-capacity claims were dropped until their lease expired. Heartbeats run
+  at half of the shortest in-flight task `lease_secs`.
 - `@orch8.io/sdk/browser`: a browser-safe entry point (no Node built-ins in its
   module graph; exported with a `browser` condition). CI bundles it with esbuild
   for `platform: "browser"` and fails on any `node:` reference.

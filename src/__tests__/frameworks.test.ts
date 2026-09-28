@@ -6,6 +6,7 @@ import { Module, Injectable } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { describe, expect, it } from "vitest";
 import type { WorkerTask } from "../types.js";
+import { workerTaskContext } from "../worker.js";
 import { FakeOrch8Server } from "../testing/index.js";
 import { getOrch8, orch8Express, orch8RawBody } from "../express/index.js";
 import {
@@ -96,7 +97,7 @@ describe("NestJS module", () => {
   it("discovers @Orch8Handler methods bound to their instance", async () => {
     const handlers = discoverHandlers([new EmailHandlers("yo")]);
     expect(Object.keys(handlers)).toEqual(["greet"]);
-    expect(await handlers.greet({ params: { name: "Ada" } } as WorkerTask)).toEqual({ greeting: "yo Ada" });
+    expect(await handlers.greet({ params: { name: "Ada" } } as WorkerTask, workerTaskContext({} as WorkerTask, "w"))).toEqual({ greeting: "yo Ada" });
     expect(() => discoverHandlers([new EmailHandlers(), new (class extends EmailHandlers {})()])).toThrow(/duplicate/);
   });
 
