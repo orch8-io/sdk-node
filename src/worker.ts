@@ -63,8 +63,8 @@ export class Orch8Worker {
   /** Claims whose lease was lost (heartbeat 404/409); never acknowledged. */
   private lostTasks = new Set<string>();
   private running = false;
-  private pollTimers = new Map<string, NodeJS.Timeout>();
-  private heartbeatTimer: NodeJS.Timeout | null = null;
+  private pollTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private inFlightTasks = new Map<string, WorkerTask>();
   private executingPromises = new Set<Promise<void>>();
   private concurrencySemaphore: number;
@@ -140,7 +140,7 @@ export class Orch8Worker {
     // Drain in-flight tasks with a hard timeout.
     const drainTimeoutMs = 30_000;
     const drain = Promise.allSettled(Array.from(this.executingPromises));
-    let timer: NodeJS.Timeout | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<void>((resolve) => { timer = setTimeout(resolve, drainTimeoutMs); });
     try {
       await Promise.race([drain, timeout]);
@@ -256,7 +256,7 @@ export class Orch8Worker {
 
   private async withTimeout<T>(promise: Promise<T>, timeoutMs: number | null): Promise<T> {
     if (!timeoutMs) return promise;
-    let timer: NodeJS.Timeout | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error("task timed out")), timeoutMs);
     });

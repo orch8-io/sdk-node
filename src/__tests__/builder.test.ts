@@ -224,4 +224,25 @@ describe("workflow() builder", () => {
     const wf = workflow("x", "tenant_a").step("s", "h").build();
     expect(wf.namespace).toBe("tenant_a");
   });
+
+  it("emits runtime placement as params.$runtime, not as a block field", () => {
+    const wf = workflow("review")
+      .step("confirm", "confirm_in_page", { orderId: "o-1" }, {
+        runtime: { runtime_kinds: ["browser"], requires_human_ui: true },
+        timeout: 60_000,
+      })
+      .step("targeted", "read_page", undefined, { runtime: { runtime_kinds: ["browser"], runtime_id: "tab-1" } })
+      .build();
+    expect(wf.blocks[0]).toEqual({
+      type: "step",
+      id: "confirm",
+      handler: "confirm_in_page",
+      params: { orderId: "o-1", $runtime: { runtime_kinds: ["browser"], requires_human_ui: true } },
+      timeout: 60_000,
+    });
+    expect(wf.blocks[0]).not.toHaveProperty("runtime");
+    expect((wf.blocks[1] as { params: unknown }).params).toEqual({
+      $runtime: { runtime_kinds: ["browser"], runtime_id: "tab-1" },
+    });
+  });
 });

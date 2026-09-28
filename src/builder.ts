@@ -33,8 +33,16 @@ import {
   type SubSequenceBlock,
   type TryCatchBlock,
 } from "./schema.js";
+import type { RuntimePlacement } from "./types.js";
 
 export interface StepOptions {
+  /**
+   * Placement requirements, emitted as `params.$runtime`. For example
+   * `{ runtime_kinds: ["browser"], requires_human_ui: true }` dispatches the
+   * step to a browser tab running `BrowserWorker`, even when a server worker
+   * registers the same handler.
+   */
+  runtime?: RuntimePlacement;
   delay?: DelaySpec;
   retry?: RetryPolicy;
   /** Wall-clock timeout for a single execution, in milliseconds. */
@@ -81,12 +89,13 @@ export class WorkflowBuilder<Handlers extends Record<string, unknown> = Record<s
     params?: Handlers[Name],
     opts?: StepOptions,
   ): this {
+    const { runtime, ...rest } = opts ?? {};
     const block: StepBlock = {
       type: "step",
       id,
       handler,
-      params: params ?? {},
-      ...(opts ?? {}),
+      params: runtime ? withPlacement(params, runtime) : (params ?? {}),
+      ...rest,
     };
     this.blocks.push(block);
     return this;
@@ -329,4 +338,12 @@ export function workflow<Handlers extends Record<string, unknown> = Record<strin
   namespace = "default",
 ): WorkflowBuilder<Handlers> {
   return new WorkflowBuilder<Handlers>(name, namespace);
+}
+
+/** Attach `$runtime` placement to step params (params must be an object). */
+export function withPlacement<P>(params: P | undefined, placement: RuntimePlacement): P & { $runtime: RuntimePlacement } {
+  if (params !== undefined && (params === null || typeof params !== "object" || Array.isArray(params))) {
+    throw new TypeError("runtime placement requires object step params");
+  }
+  return { ...(params ?? {}), $runtime: placement } as P & { $runtime: RuntimePlacement };
 }

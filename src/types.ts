@@ -227,6 +227,108 @@ export interface WorkerTask {
   claim_epoch?: number;
   resume_checkpoint?: unknown;
   checkpoint_seq: number;
+  /**
+   * Deterministic idempotency key of the step's effect receipt. Pass it to
+   * downstream APIs as an idempotency key. Absent on older servers.
+   */
+  effect_id?: string;
+  /** Continuity owner epoch at dispatch; fenced together with `claim_epoch`. */
+  continuity_epoch?: number;
+  /** Lease the server expects between heartbeats for this task, in seconds. */
+  lease_secs?: number;
+  /** Echo of the step's `$runtime.runtime_id` placement, for debugging. */
+  target_runtime_id?: string;
+  /** Echo of the step's `$runtime.runtime_kinds` placement, for debugging. */
+  runtime_kinds?: RuntimeKind[];
+}
+
+/** Kind of runtime node that claims worker tasks. */
+export type RuntimeKind = "server" | "edge" | "mobile" | "desktop" | "browser";
+
+/** How strongly a runtime's identity is verified. Self-advertised runtimes may claim at most `registered`. */
+export type RuntimeTrustLevel = "unverified" | "registered" | "signed" | "attested";
+
+/** Current network path of a runtime. */
+export type RuntimeConnectivity = "offline" | "metered" | "wifi" | "ethernet";
+
+/**
+ * Short-lived (at most five minutes) capability advertisement sent with a
+ * poll or to `/runtimes/register`. `runtime_id` must equal the poll's `worker_id`.
+ */
+export interface RuntimeCapabilities {
+  runtime_id: string;
+  kind: RuntimeKind;
+  trust: RuntimeTrustLevel;
+  handlers?: string[];
+  plugins?: string[];
+  /** Credential binding references only, never secret material. */
+  credentials?: string[];
+  regions?: string[];
+  hardware?: string[];
+  offline_capable?: boolean;
+  connectivity?: RuntimeConnectivity;
+  battery_percent?: number;
+  estimated_cost_microunits?: number;
+  estimated_latency_ms?: number;
+  draining?: boolean;
+  capsule_signing_public_key?: string;
+  /** RFC 3339 timestamp. */
+  observed_at: string;
+  /** RFC 3339 timestamp, at most five minutes after `observed_at`. */
+  expires_at: string;
+}
+
+/**
+ * Step placement requirements, carried as `params.$runtime`. Use the
+ * builder's `runtime` step option to set it.
+ */
+export interface RuntimePlacement {
+  /** Only runtime nodes of these kinds may claim the step. */
+  runtime_kinds?: RuntimeKind[];
+  /** Only this specific node may claim the step (a per-device mailbox). */
+  runtime_id?: string;
+  /** Requires a runtime with a human-facing UI (mobile, desktop or browser). */
+  requires_human_ui?: boolean;
+  requires_network?: boolean;
+  minimum_trust?: RuntimeTrustLevel;
+  handlers?: string[];
+  plugins?: string[];
+  regions?: string[];
+  hardware?: string[];
+  /**
+   * Credential references the step needs. Steps placed on browser runtimes
+   * must not reference credentials; the engine fails them permanently.
+   */
+  credentials?: string[];
+}
+
+/** Request body of `POST /runtimes/browser-sessions`. */
+export interface CreateBrowserSessionRequest {
+  /** Stable id for the browser node; the server generates one when omitted. */
+  runtimeId?: string;
+  /** Handler allowlist; poll returns only tasks for these handlers. */
+  handlers: string[];
+  /** Token lifetime in seconds (server default 900, max 3600). */
+  ttlSecs?: number;
+  queues?: string[];
+}
+
+/** A short-lived, browser-scoped worker credential. */
+export interface BrowserSession {
+  token: string;
+  runtimeId: string;
+  /** RFC 3339 timestamp. */
+  expiresAt: string;
+  handlers: string[];
+}
+
+/** Body of `POST /workers/tasks/{id}/release`. */
+export interface ReleaseRequest {
+  worker_id: string;
+  claim_epoch?: number;
+  /** Whether the handler already started; `true` makes a side-effecting step's receipt `Unknown`. */
+  started: boolean;
+  [key: string]: unknown;
 }
 
 export interface ClusterNode {
@@ -634,6 +736,7 @@ export interface PollRequest {
   worker_id?: string;
   limit?: number;
   capacity?: number;
+  capabilities?: RuntimeCapabilities;
   [key: string]: unknown;
 }
 
