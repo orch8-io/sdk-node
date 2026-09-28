@@ -227,8 +227,7 @@ export class BrowserWorker {
       throw err;
     }
     this.state = "running";
-    this.link.send({ type: "start", config: this.engineConfig() });
-    this.link.send({ type: "token", ...this.session });
+    this.link.send({ type: "start", config: this.engineConfig(), token: this.session });
     this.attachLifecycle();
     this.notify({ type: "started", runtimeId: this.session.runtimeId, mode: this.link.mode });
   }
@@ -395,10 +394,8 @@ export class BrowserWorker {
     void this.release("engine_error");
     this.link.close();
     this.link = this.openMainLink();
-    this.link.send({ type: "start", config: this.engineConfig() });
-    if (this.session) this.link.send({ type: "token", ...this.session });
     this.paused = false;
-    this.link.send({ type: "resume" });
+    this.link.send({ type: "start", config: this.engineConfig(), token: this.session ?? undefined });
   }
 
   private onEngineEvent(event: EngineEvent): void {

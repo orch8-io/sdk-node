@@ -26,7 +26,7 @@ export interface EngineConfig {
 }
 
 export type EngineCommand =
-  | { type: "start"; config: EngineConfig }
+  | { type: "start"; config: EngineConfig; token?: { token: string; expiresAt: number; runtimeId: string } }
   | { type: "token"; token: string; expiresAt: number; runtimeId: string }
   | { type: "tokenError"; message: string }
   | { type: "result"; taskId: string; ok: true; output: unknown }

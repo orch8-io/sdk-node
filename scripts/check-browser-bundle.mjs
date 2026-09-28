@@ -10,6 +10,7 @@
 import { build } from "esbuild";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { runInNewContext } from "node:vm";
 
 const root = resolve(import.meta.dirname ?? new URL(".", import.meta.url).pathname, "..");
 const entries = [["src", resolve(root, "src/browser/index.ts")]];
@@ -64,7 +65,9 @@ if (bundleForSelfTest) {
     },
   };
   try {
-    new Function("self", source)(self);
+    // A fresh realm with only worker-like globals, so the source cannot lean
+    // on anything from this script or Node.
+    runInNewContext(source, { self, setTimeout, clearTimeout, AbortController });
     onMessage({ data: { type: "start", config: {
       baseUrl: "https://engine.test", handlers: ["h"], maxConcurrent: 1, pollIntervalMs: 60_000,
       maxBackoffMs: 60_000, capabilityTtlSecs: 240, trust: "registered", refreshMarginMs: 60_000,

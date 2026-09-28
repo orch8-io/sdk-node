@@ -509,7 +509,8 @@ export function leaseEngine(host: EngineHost): EngineController {
         cfg = command.config;
         running = true;
         paused = false;
-        if (tokenValid()) ensurePolling();
+        if (command.token) onToken(command.token);
+        else if (tokenValid()) ensurePolling();
         else requestToken();
         return;
       case "token":
