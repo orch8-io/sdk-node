@@ -461,6 +461,47 @@ describe("BrowserWorker", () => {
     await worker.stop();
   });
 
+  it("turns a 413 on complete into a permanent failure instead of holding the claim", async () => {
+    const server = fakeServer();
+    server.enqueue(task());
+    server.routes.complete = () => ({
+      status: 413,
+      body: { error: { code: "payload_too_large", message: "browser step output is 2000000 bytes; the maximum is 1048576" } },
+    });
+    const { worker } = makeWorker(server, { maxOutputBytes: 16 * 1024 * 1024 });
+    worker.register("confirm", async () => ({ ok: true }));
+    await worker.start();
+    await flush();
+    expect(server.of("complete")).toHaveLength(1);
+    const fails = server.of("fail");
+    expect(fails).toHaveLength(1);
+    expect(fails[0].body).toMatchObject({ worker_id: "tab-1", claim_epoch: 7, retryable: false });
+    expect(fails[0].body.message).toMatch(/too large \(413\): browser step output is 2000000 bytes/);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(server.of("complete")).toHaveLength(1);
+    expect(server.of("heartbeat")).toHaveLength(0);
+    await worker.stop();
+  });
+
+  it("never runs a handler whose task was released before it started, and releases with started=false", async () => {
+    const server = fakeServer();
+    server.enqueue(task());
+    const handler = vi.fn(async () => ({}));
+    const { worker } = makeWorker(server, {
+      onEvent: (event) => {
+        if (event.type === "task_started") window.dispatchEvent(new Event("pagehide"));
+      },
+    });
+    worker.register("confirm", handler);
+    await worker.start();
+    await flush();
+    expect(handler).not.toHaveBeenCalled();
+    expect(server.of("release")[0].body).toEqual({ worker_id: "tab-1", claim_epoch: 7, started: false });
+    expect(server.of("complete")).toHaveLength(0);
+    expect(server.of("fail")).toHaveLength(0);
+    await worker.stop();
+  });
+
   it("fails a timed-out task as retryable and aborts its signal", async () => {
     const server = fakeServer();
     server.enqueue(task({ timeout_ms: 5_000 }));

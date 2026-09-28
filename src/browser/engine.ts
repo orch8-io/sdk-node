@@ -418,11 +418,11 @@ export function leaseEngine(host: EngineHost): EngineController {
     entry.acking = true;
     if (entry.hbTimer) clearTimeout(entry.hbTimer);
     entry.hbTimer = null;
-    const body: Record<string, unknown> = command.ok
+    let body: Record<string, unknown> = command.ok
       ? { worker_id: entry.workerId, claim_epoch: entry.task.claim_epoch, output: command.output === undefined ? {} : command.output }
       : { worker_id: entry.workerId, claim_epoch: entry.task.claim_epoch, message: command.message, retryable: command.retryable };
-    const path = taskPath(command.taskId, command.ok ? "complete" : "fail");
-    const outcome = command.ok ? "completed" : "failed";
+    let path = taskPath(command.taskId, command.ok ? "complete" : "fail");
+    let outcome: "completed" | "failed" = command.ok ? "completed" : "failed";
     const attempt = (n: number): void => {
       if (tasks.get(command.taskId) !== entry) return;
       if (!tokenValid()) {
@@ -432,6 +432,24 @@ export function leaseEngine(host: EngineHost): EngineController {
       post(path, body).then(
         (res) => {
           if (ok(res.status)) finish(outcome, res.status);
+          else if (res.status === 413 && outcome === "completed") {
+            // The server refused the output as too large: retrying the same
+            // payload can never succeed, so fail the step permanently now
+            // instead of holding the claim until the lease expires.
+            // Error envelope: {"error": {"code", "message", ...}}.
+            const envelope = res.body && typeof res.body === "object" ? (res.body as { error?: { message?: unknown } | unknown }) : null;
+            const inner = envelope && envelope.error && typeof envelope.error === "object" ? (envelope.error as { message?: unknown }) : null;
+            const reason = inner && typeof inner.message === "string" ? inner.message : "";
+            body = {
+              worker_id: entry.workerId,
+              claim_epoch: entry.task.claim_epoch,
+              message: "step output was refused by the engine as too large (413)" + (reason ? ": " + reason.slice(0, 300) : ""),
+              retryable: false,
+            };
+            path = taskPath(command.taskId, "fail");
+            outcome = "failed";
+            attempt(n);
+          }
           else if (res.status === 404 || res.status === 409 || res.status === 410) finish("lost", res.status);
           else if (res.status === 401 || res.status === 403 || res.status === 429 || res.status >= 500) {
             if (res.status === 401 || res.status === 403) onAuthError();

@@ -492,13 +492,20 @@ export class BrowserWorker {
       signal: controller.signal,
       heartbeat: () => this.heartbeat(task.id),
     };
-    entry.started = true;
     this.notify({ type: "task_started", taskId: task.id, handler: task.handler_name });
+    const notRun = Symbol("notRun");
     Promise.resolve()
-      .then(() => handler(task.params, ctx))
+      .then(() => {
+        // Released (tab hidden/closed), timed out or stopped before the
+        // handler ran: never run it, so the release reported `started: false`
+        // and the engine hands the task straight back to `pending`.
+        if (this.inflight.get(task.id) !== entry) return notRun;
+        entry.started = true;
+        return handler(task.params, ctx);
+      })
       .then(
         (output) => {
-          if (this.inflight.get(task.id) !== entry) return;
+          if (output === notRun || this.inflight.get(task.id) !== entry) return;
           this.settle(task.id);
           let bytes: number;
           try {

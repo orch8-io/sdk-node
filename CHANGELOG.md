@@ -41,3 +41,15 @@
 
 - `Orch8Worker` timer fields use `ReturnType<typeof setTimeout>` instead of
   `NodeJS.Timeout`.
+
+### Fixed
+
+- `BrowserWorker` no longer runs a handler whose task was released (tab
+  hidden/closed, `stop()`) before the handler was invoked, and reports such a
+  release with `started: false`, so the engine returns the task to `pending`
+  immediately instead of treating it as a possibly-started effect.
+- `BrowserWorker` turns a `413` from `complete` (output over the engine's
+  `ORCH8_BROWSER_OUTPUT_MAX_BYTES`) into a non-retryable `fail` instead of
+  holding the claim until the lease expires.
+- `npm run test:e2e:browser`: end-to-end suite for `BrowserWorker` against a
+  real engine (`ORCH8_E2E_URL`, `ORCH8_E2E_ADMIN_KEY`).
