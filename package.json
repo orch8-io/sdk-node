@@ -112,6 +112,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e:browser": "vitest run test/e2e/browser-worker.e2e.test.ts",
     "check:browser": "node scripts/generate-lease-worker.mjs --check && node scripts/check-browser-bundle.mjs",
     "generate:lease-worker": "node scripts/generate-lease-worker.mjs"
   },
