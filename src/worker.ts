@@ -7,6 +7,7 @@ import type {
 } from "./types.js";
 import { Orch8Client, Orch8Error } from "./client.js";
 import { workerTaskContext, type WorkerTaskContext } from "./internal/task-context.js";
+import { buildAdvertisement } from "./internal/capabilities.js";
 
 export { workerTaskContext, type WorkerTaskContext };
 
@@ -80,8 +81,6 @@ export interface WorkerConfig {
    */
   capabilities?: WorkerCapabilities;
 }
-
-const MAX_CAPABILITY_TTL_SECS = 300;
 
 export class Orch8Worker {
   private readonly config: Required<
@@ -210,18 +209,7 @@ export class Orch8Worker {
   private advertisement(): RuntimeCapabilities | undefined {
     const caps = this.config.capabilities;
     if (!caps) return undefined;
-    const { ttlSecs, kind, trust, handlers, ...facts } = caps;
-    const ttl = Math.min(Math.max(ttlSecs ?? MAX_CAPABILITY_TTL_SECS, 1), MAX_CAPABILITY_TTL_SECS);
-    const now = Date.now();
-    return {
-      ...facts,
-      runtime_id: this.config.workerId,
-      kind: kind ?? "server",
-      trust: trust ?? "registered",
-      handlers: handlers ?? Object.keys(this.config.handlers),
-      observed_at: new Date(now).toISOString(),
-      expires_at: new Date(now + ttl * 1000).toISOString(),
-    };
+    return buildAdvertisement(caps, this.config.workerId, Object.keys(this.config.handlers), Date.now());
   }
 
   /**
