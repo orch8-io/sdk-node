@@ -14,8 +14,16 @@ export {
   type WaitForJobOptions,
 } from "./jobs.js";
 export { ContinuityClient, type JsonObject, type QueryValue } from "./continuity.js";
-export { Orch8Worker, type WorkerConfig, type HandlerFn, type WorkerRuntimeStats } from "./worker.js";
-export { WorkflowBuilder, workflow, type StepOptions } from "./builder.js";
+export {
+  Orch8Worker,
+  workerTaskContext,
+  type WorkerConfig,
+  type HandlerFn,
+  type WorkerRuntimeStats,
+  type WorkerTaskContext,
+  type WorkerCapabilities,
+} from "./worker.js";
+export { WorkflowBuilder, workflow, withPlacement, type StepOptions } from "./builder.js";
 export { verifyWebhookSignature } from "./webhook.js";
 export { durableAgentHandler, type AgentRunner, type DurableAgentTask } from "./adapters.js";
 export type * from "./types.js";

@@ -1,7 +1,7 @@
 {
   "name": "@orch8.io/sdk",
   "version": "0.7.0",
-  "description": "Node.js SDK for Orch8 workflow engine",
+  "description": "Node.js and browser SDK for Orch8 workflow engine",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -22,6 +22,13 @@
         "default": "./dist/index.js"
       }
     },
+    "./browser": {
+      "types": "./dist/browser/index.d.ts",
+      "browser": "./dist/browser/index.js",
+      "import": "./dist/browser/index.js",
+      "require": "./dist/browser/index.js",
+      "default": "./dist/browser/index.js"
+    },
     "./push": {
       "import": {
         "types": "./dist/push/index.d.ts",
@@ -30,6 +37,16 @@
       "require": {
         "types": "./dist/push/index.d.ts",
         "default": "./dist/push/index.js"
+      }
+    },
+    "./serverless": {
+      "import": {
+        "types": "./dist/serverless/index.d.ts",
+        "default": "./dist/serverless/index.js"
+      },
+      "require": {
+        "types": "./dist/serverless/index.d.ts",
+        "default": "./dist/serverless/index.js"
       }
     },
     "./testing": {
@@ -102,14 +119,20 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e:browser": "vitest run test/e2e/browser-worker.e2e.test.ts",
+    "check:browser": "node scripts/generate-lease-worker.mjs --check && node scripts/check-browser-bundle.mjs",
+    "generate:lease-worker": "node scripts/generate-lease-worker.mjs"
   },
   "keywords": [
     "orch8",
     "workflow",
     "orchestration",
-    "sdk"
+    "sdk",
+    "browser",
+    "serverless"
   ],
   "repository": {
     "type": "git",
@@ -156,7 +179,9 @@
     "@nestjs/core": "^10.4.22",
     "@types/express": "^4.17.25",
     "@types/node": "^20.0.0",
+    "esbuild": "^0.25.12",
     "express": "^4.22.3",
+    "jsdom": "^25.0.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "typescript": "^5.4.0",

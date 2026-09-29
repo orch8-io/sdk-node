@@ -211,6 +211,122 @@ A lease does not authorize offline execution. Handlers are not forcibly cancelle
 on lease loss or timeout; use bounded work and provider idempotency keys for
 external effects. `stop()` waits up to 30 seconds for executing handlers.
 
+Handlers receive a second argument with the task's lease facts. `effectId` is
+the server's deterministic idempotency key for the step's effect; pass it to
+downstream APIs. All three are `null` against servers that predate them:
+
+```typescript
+handlers: {
+  "charge-card": async (task, { effectId, leaseSecs, continuityEpoch }) =>
+    payments.charge(task.params, { idempotencyKey: effectId ?? task.id }),
+},
+```
+
+Steps can require a runtime with `params.$runtime` (kinds, a specific
+`runtime_id`, hardware, regions, plugins, trust). Such tasks are only handed
+to workers that advertise matching capabilities, so pass `capabilities` to
+claim them. The worker sends a fresh advertisement with every poll, bound to
+its `workerId` and valid for at most five minutes:
+
+```typescript
+new Orch8Worker({
+  client,
+  workerId: "gpu-box-1",
+  handlers,
+  capabilities: { kind: "desktop", hardware: ["cuda"], regions: ["norway"] },
+});
+```
+
+`kind` defaults to `server` and `trust` to `registered`; `handlers` defaults to
+the configured handler names. Tasks claimed while `stop()` is in progress, or
+beyond free capacity, are released at once (`POST /workers/tasks/{id}/release`
+with `started: false`) instead of waiting for lease expiry; servers without
+that endpoint fall back to lease expiry.
+
+## Browser worker (`@orch8.io/sdk/browser`)
+
+Run step handlers inside a web page — steps that need a human, the DOM, or data
+the page already has. The browser entry has no Node built-ins (CI bundles it
+with esbuild for `platform: "browser"` and fails on any `node:` import).
+
+**The browser never holds an API key or receives secrets.** Your backend mints
+a short-lived token scoped to `kind=browser`, one runtime id and a handler
+allowlist; it only works on the worker task endpoints. The engine never
+dispatches credential-bearing steps to browser runtimes and filters the
+instance context it sends them. Handlers *may* return page data (DOM, form
+values, user input, the page's own fetched resources) as step output; output
+is capped at 1 MiB of JSON and treated as untrusted input downstream.
+
+Backend (Node, operator/admin key):
+
+```typescript
+import { Orch8Client } from "@orch8.io/sdk";
+
+const orch8 = new Orch8Client({ baseUrl, headers: { "x-api-key": process.env.ORCH8_API_KEY! } });
+
+app.post("/api/orch8/browser-session", requireLogin, async (req, res) => {
+  res.json(await orch8.createBrowserSession({
+    runtimeId: `browser-${req.user.id}`, // stable id = per-user mailbox for targeted steps
+    handlers: ["confirm_shipping"],
+    ttlSecs: 900, // server default 900, max 3600
+  }));
+});
+```
+
+Page:
+
+```typescript
+import { BrowserWorker, readForm } from "@orch8.io/sdk/browser";
+
+const worker = new BrowserWorker({
+  baseUrl: "https://orch8.example.com", // add your origin to ORCH8_CORS_ORIGINS
+  getToken: () => fetch("/api/orch8/browser-session", { method: "POST" }).then((r) => r.json()),
+});
+
+worker.register("confirm_shipping", async (input, ctx) => {
+  const values = await askUser(input, { signal: ctx.signal }); // abort on lease loss / tab hidden
+  return { shipping: values, idempotencyKey: ctx.effectId };
+});
+
+await worker.start();
+```
+
+Place the step on a browser in the workflow:
+
+```typescript
+workflow("fulfilment")
+  .step("confirm", "confirm_shipping", { orderId: "o-1" }, {
+    runtime: { runtime_kinds: ["browser"], requires_human_ui: true }, // or runtime_id: "browser-u1"
+  });
+```
+
+How it behaves:
+
+- **Lease protocol.** Polls each handler with `capabilities { kind: "browser", runtime_id, handlers, expires_at }`
+  (≤ 5 minutes, never past the token expiry), heartbeats every `lease_secs / 3` (default lease 30 s),
+  then completes or fails echoing `claim_epoch`. A 404/409 heartbeat aborts `ctx.signal` with
+  `LeaseLostError` and the result is never acknowledged. `ctx.heartbeat()` extends the lease on demand.
+- **Page lifecycle.** On `pagehide` and `visibilitychange → hidden` (configure with `releaseOn`) every
+  in-flight task is released via `POST /workers/tasks/{id}/release` using `fetch(..., { keepalive: true })`
+  with `started: true`, handlers see `TaskReleasedError` on `ctx.signal`, and polling pauses until the
+  page is visible again (or restored from the back/forward cache). Claims the page never started are
+  released with `started: false`. Long interactive steps may prefer `releaseOn: ["pagehide"]`.
+- **Tokens.** `getToken` runs at start and `refreshMarginSecs` (60) before expiry, and again on a 401/403.
+  If the token lapses without a successful refresh, the worker stops and emits `{ type: "stopped", reason: "token_expired" }`.
+- **Background tabs.** The poll/heartbeat loop runs in a dedicated Web Worker (started from a Blob URL;
+  worker timers are throttled far less than a hidden tab's), while handlers run on the main thread with DOM
+  access, bridged by `postMessage`. Without Worker support, or under a CSP without `worker-src blob:`, it falls
+  back to the main thread (`mode: "main"` forces that; `mode: "worker"` refuses to fall back).
+- **Resilience and privacy.** Poll failures back off exponentially with jitter (`pollIntervalMs` 1 s up to
+  `maxBackoffMs` 30 s). `onEvent` receives lifecycle events with ids only; task input and output are never logged.
+- **Page-data helpers.** `readForm(selectorOrForm)` (never reads password or file inputs, and hidden inputs only
+  with `includeHidden`), `readSelection()`, `querySelectorText()`, `querySelectorAllText()`, and
+  `assertOutputSize()` / `OutputTooLargeError` for the 1 MiB output guard (`maxOutputBytes` to change it).
+
+A complete example (HTML page, handler and backend) lives in
+[`examples/browser-worker/`](examples/browser-worker/); the end-to-end guide to
+running steps in a user's tab is [`docs/browser-executor.md`](docs/browser-executor.md).
+
 ## Typed step IO (`orch8-typegen`)
 
 `orch8-typegen` turns a sequence file's JSON Schema contracts into TypeScript:
@@ -304,6 +420,72 @@ export default createCloudflarePushHandler((env: Env) => ({
 `verifyPushSignature(rawBody, headers, secret)` is exported for custom
 receivers. Signature checks need the raw body bytes; do not re-serialize parsed
 JSON. Keep handlers well inside your platform's function timeout.
+
+## Serverless executors (`@orch8.io/sdk/serverless`)
+
+Push dispatch wakes a function per task. Serverless executors go the other
+way: a scheduled or on-demand invocation **pulls** a bounded batch of tasks,
+runs them inside the time it has left, and leaves no lease behind. They use
+the regular worker lease API (`poll` → `heartbeat` → `complete` | `fail` |
+`release`, echoing `claim_epoch`); no extra engine endpoints are involved.
+
+```typescript
+// AWS Lambda, triggered by an EventBridge schedule (the event is ignored)
+import { Orch8Client, createLambdaExecutor } from "@orch8.io/sdk/serverless";
+
+export const handler = createLambdaExecutor(() => ({
+  client: new Orch8Client({ baseUrl: process.env.ORCH8_URL!, headers: { "x-api-key": process.env.ORCH8_API_KEY! } }),
+  handlers: { "thumbnail.render": async (task, ctx) => render(task.params, { signal: ctx.signal }) },
+  maxTasks: 5,          // N tasks claimed per invocation
+  safetyMarginMs: 3000, // kept free before the Lambda timeout
+}));
+```
+
+```typescript
+// Cloudflare Workers: Cron Trigger + authenticated POST, fetch only (no nodejs_compat)
+import { Orch8Client, createCloudflareExecutor } from "@orch8.io/sdk/serverless";
+
+export default createCloudflareExecutor((env: Env) => ({
+  client: new Orch8Client({ baseUrl: env.ORCH8_URL, headers: { "x-api-key": env.ORCH8_API_KEY } }),
+  handlers: { "lead.enrich": async (task) => enrich(task.params) },
+  budgetMs: 25_000,                       // Workers have no remaining-time API
+  triggerSecret: env.ORCH8_TRIGGER_SECRET, // fetch trigger answers 404 without it
+}));
+```
+
+Both adapters call `drainOnce({ client, handlers, deadlineMs, ... })`, which
+you can use directly from any short-lived process (CronJob, CI, Vercel cron).
+`deadlineMs` is an absolute epoch-ms deadline by which every lease must be
+settled. Each drain:
+
+1. polls every handler (or `queueName`) with `limit` up to `maxTasks`
+   (default 10) and optional `capabilities` (Lambda advertises `kind: server`,
+   Cloudflare `kind: edge` by default), in rounds until the queue is empty,
+   `maxTasks` is reached, or less than `minTaskBudgetMs` remains;
+2. runs claimed tasks concurrently, heartbeating at the shorter of
+   `heartbeatIntervalMs` and half the lease;
+3. completes or fails each one like `Orch8Worker` (thrown errors are retryable
+   unless `err.retryable === false`; `timeout_ms` is enforced);
+4. at `deadlineMs - releaseMarginMs` (default 1 s before), aborts `ctx.signal`
+   and releases every still-running task with `started: true`, so the engine
+   re-dispatches it (and marks a side-effecting step's receipt Unknown) instead
+   of waiting for the lease to expire. A claim whose `timeout_ms` cannot fit
+   the remaining budget is released with `started: false` without running.
+   A result that arrives after its release is never acknowledged.
+
+Handlers are plain `Orch8Worker` handlers; the context additionally has
+`signal`, `deadlineMs`, `remainingMs()` and `heartbeat()`. The returned
+`DrainResult` lists every task's outcome (`completed`, `failed`, `released`,
+`released_unstarted`, `lease_lost`, `ack_rejected`) and why the drain stopped
+(`empty`, `deadline`, `max_tasks`, `poll_error`); the Cloudflare fetch trigger
+returns it as JSON (502 on `poll_error`).
+
+The `@orch8.io/sdk/serverless` module graph has no Node built-ins and
+re-exports `Orch8Client`; import from it (not the root entry) on edge runtimes.
+Handlers still must be idempotent: a released task runs again elsewhere. Full
+examples: [`examples/serverless-lambda/`](examples/serverless-lambda/) (with a
+SAM template), [`examples/serverless-cloudflare/`](examples/serverless-cloudflare/)
+(with `wrangler.toml`) and [`examples/serverless-drain/`](examples/serverless-drain/).
 
 ## Framework integrations
 
@@ -510,4 +692,7 @@ try {
 npm install
 npm run build
 npm test
+npm run typecheck
+npm run check:browser        # browser bundle has no node: imports; lease worker source is fresh
+npm run generate:lease-worker # after editing src/browser/engine.ts
 ```

@@ -1,0 +1,34 @@
+# AWS SAM template: a scheduled Orch8 executor. Deploy with `sam build && sam deploy --guided`.
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Parameters:
+  Orch8Url:
+    Type: String
+  Orch8TenantId:
+    Type: String
+  Orch8ApiKey:
+    Type: String
+    NoEcho: true
+Resources:
+  Orch8Executor:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: nodejs20.x
+      Handler: handler.handler
+      Timeout: 60 # the executor budgets itself from context.getRemainingTimeInMillis()
+      MemorySize: 512
+      ReservedConcurrentExecutions: 4
+      Environment:
+        Variables:
+          ORCH8_URL: !Ref Orch8Url
+          ORCH8_TENANT_ID: !Ref Orch8TenantId
+          ORCH8_API_KEY: !Ref Orch8ApiKey
+      Events:
+        Drain:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: rate(1 minute)
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints: [handler.ts]

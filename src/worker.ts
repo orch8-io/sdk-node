@@ -1,7 +1,44 @@
-import type { WorkerTask } from "./types.js";
+import type {
+  RuntimeCapabilities,
+  RuntimeConnectivity,
+  RuntimeKind,
+  RuntimeTrustLevel,
+  WorkerTask,
+} from "./types.js";
 import { Orch8Client, Orch8Error } from "./client.js";
+import { workerTaskContext, type WorkerTaskContext } from "./internal/task-context.js";
+import { buildAdvertisement } from "./internal/capabilities.js";
 
-export type HandlerFn = (task: WorkerTask) => Promise<unknown>;
+export { workerTaskContext, type WorkerTaskContext };
+
+export type HandlerFn = (task: WorkerTask, context: WorkerTaskContext) => Promise<unknown>;
+
+/**
+ * Capabilities advertised with every poll so the worker can claim tasks whose
+ * `params.$runtime` placement requires them. `runtime_id` is always the
+ * worker id, `handlers` defaults to the configured handler names, and the
+ * observation window is refreshed on each poll.
+ */
+export interface WorkerCapabilities {
+  /** Default: `server`. */
+  kind?: RuntimeKind;
+  /** Default: `registered` (the most a self-advertised runtime may claim). */
+  trust?: RuntimeTrustLevel;
+  handlers?: string[];
+  plugins?: string[];
+  /** Credential binding references only, never secret material. */
+  credentials?: string[];
+  regions?: string[];
+  hardware?: string[];
+  offline_capable?: boolean;
+  connectivity?: RuntimeConnectivity;
+  battery_percent?: number;
+  estimated_cost_microunits?: number;
+  estimated_latency_ms?: number;
+  capsule_signing_public_key?: string;
+  /** Advertisement lifetime, capped at 300 (the server maximum). Default: 300. */
+  ttlSecs?: number;
+}
 
 export interface WorkerRuntimeStats {
   running: boolean;
@@ -38,6 +75,11 @@ export interface WorkerConfig {
    * This ensures consistent auth, headers, and base URL handling.
    */
   client?: Orch8Client;
+  /**
+   * Advertise runtime capabilities with each poll. Without them the worker
+   * only claims tasks that carry no `$runtime` requirements.
+   */
+  capabilities?: WorkerCapabilities;
 }
 
 export class Orch8Worker {
@@ -55,16 +97,18 @@ export class Orch8Worker {
     handlers: Record<string, HandlerFn>;
     onTaskComplete?: (task: WorkerTask, output: unknown) => void;
     onTaskFail?: (task: WorkerTask, error: string) => void;
+    capabilities?: WorkerCapabilities;
   };
 
   private readonly client: Orch8Client;
+  private stopping = false;
   private pollHints = new Map<string, number>();
   private heartbeatIntervals = new Map<string, number>();
   /** Claims whose lease was lost (heartbeat 404/409); never acknowledged. */
   private lostTasks = new Set<string>();
   private running = false;
-  private pollTimers = new Map<string, NodeJS.Timeout>();
-  private heartbeatTimer: NodeJS.Timeout | null = null;
+  private pollTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private inFlightTasks = new Map<string, WorkerTask>();
   private executingPromises = new Set<Promise<void>>();
   private concurrencySemaphore: number;
@@ -87,6 +131,7 @@ export class Orch8Worker {
       circuitBreakerCheck: config.circuitBreakerCheck ?? false,
       onTaskComplete: config.onTaskComplete,
       onTaskFail: config.onTaskFail,
+      capabilities: config.capabilities,
     };
     this.client = config.client ?? new Orch8Client({ baseUrl: this.config.engineUrl, retry: false });
     this.concurrencySemaphore = this.config.maxConcurrent;
@@ -95,6 +140,7 @@ export class Orch8Worker {
   async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
+    this.stopping = false;
 
     // Start a poll loop per handler using dynamic scheduling for backoff.
     for (const handlerName of Object.keys(this.config.handlers)) {
@@ -131,6 +177,7 @@ export class Orch8Worker {
 
   async stop(): Promise<void> {
     this.running = false;
+    this.stopping = true;
     for (const timer of this.pollTimers.values()) clearTimeout(timer);
     this.pollTimers.clear();
     if (this.heartbeatTimer) {
@@ -140,7 +187,7 @@ export class Orch8Worker {
     // Drain in-flight tasks with a hard timeout.
     const drainTimeoutMs = 30_000;
     const drain = Promise.allSettled(Array.from(this.executingPromises));
-    let timer: NodeJS.Timeout | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<void>((resolve) => { timer = setTimeout(resolve, drainTimeoutMs); });
     try {
       await Promise.race([drain, timeout]);
@@ -156,6 +203,30 @@ export class Orch8Worker {
       availableSlots: this.concurrencySemaphore,
       handlers: Object.keys(this.config.handlers),
     };
+  }
+
+  /** Fresh capability advertisement for one poll, or undefined when none is configured. */
+  private advertisement(): RuntimeCapabilities | undefined {
+    const caps = this.config.capabilities;
+    if (!caps) return undefined;
+    return buildAdvertisement(caps, this.config.workerId, Object.keys(this.config.handlers), Date.now());
+  }
+
+  /**
+   * Give claimed-but-unstarted tasks back (`started: false`) so they return to
+   * `pending` at once instead of waiting for lease expiry. Servers without
+   * `/release` answer 404/405; the lease then expires as before.
+   */
+  private async releaseUnstarted(tasks: WorkerTask[]): Promise<void> {
+    await Promise.allSettled(
+      tasks.map((task) =>
+        this.client.releaseTask(task.id, {
+          worker_id: this.config.workerId,
+          claim_epoch: task.claim_epoch,
+          started: false,
+        }),
+      ),
+    );
   }
 
   private async poll(handlerName: string): Promise<void> {
@@ -174,10 +245,12 @@ export class Orch8Worker {
     try {
       const limit = Math.min(this.concurrencySemaphore, this.config.maxConcurrent);
 
+      const capabilities = this.advertisement();
       const batch = await this.client.pollTaskBatch({
         handler_name: handlerName,
         worker_id: this.config.workerId,
         limit,
+        ...(capabilities ? { capabilities } : {}),
       });
       const tasks = batch.tasks;
       this.pollHints.set(handlerName, batch.poll_after_ms ?? 0);
@@ -187,18 +260,28 @@ export class Orch8Worker {
         (batch.lease_secs ?? Infinity) * 500,
       );
       this.heartbeatIntervals.set(handlerName, heartbeatMs);
-      if (this.running) this.resetHeartbeatTimer();
 
       // Reset backoff on successful poll.
       this.consecutiveFailures.set(handlerName, 0);
 
+      const unstarted: WorkerTask[] = [];
       for (const task of tasks) {
-        if (this.concurrencySemaphore <= 0) break;
+        // Claimed while shutting down, or beyond free capacity: never started.
+        if (!this.running || this.stopping || this.concurrencySemaphore <= 0) {
+          unstarted.push(task);
+          continue;
+        }
         this.concurrencySemaphore--;
         this.inFlightTasks.set(task.id, task);
         const p = this.executeTask(task);
         this.executingPromises.add(p);
         p.finally(() => this.executingPromises.delete(p));
+      }
+      if (this.running) this.resetHeartbeatTimer();
+      if (unstarted.length > 0) {
+        const released = this.releaseUnstarted(unstarted);
+        this.executingPromises.add(released);
+        void released.finally(() => this.executingPromises.delete(released));
       }
     } catch {
       // Network error — increment failures for backoff.
@@ -221,7 +304,7 @@ export class Orch8Worker {
     try {
       let output: unknown;
       try {
-        output = await this.withTimeout(handler(task), task.timeout_ms);
+        output = await this.withTimeout(handler(task, workerTaskContext(task, this.config.workerId)), task.timeout_ms);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         // Uncaught errors are transient unless explicitly flagged otherwise.
@@ -256,7 +339,7 @@ export class Orch8Worker {
 
   private async withTimeout<T>(promise: Promise<T>, timeoutMs: number | null): Promise<T> {
     if (!timeoutMs) return promise;
-    let timer: NodeJS.Timeout | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error("task timed out")), timeoutMs);
     });
@@ -287,7 +370,15 @@ export class Orch8Worker {
   private heartbeatDelayMs = 0;
 
   private resetHeartbeatTimer(): void {
-    const delay = Math.min(this.config.heartbeatIntervalMs, ...this.heartbeatIntervals.values());
+    // Heartbeat at half of the shortest lease in play: the poll-level hint and
+    // each in-flight task's own `lease_secs` (mobile/browser leases differ).
+    const taskLeaseMs = Array.from(this.inFlightTasks.values(), (t) =>
+      typeof t.lease_secs === "number" && t.lease_secs > 0 ? t.lease_secs * 500 : Infinity,
+    );
+    const delay = Math.max(
+      250,
+      Math.min(this.config.heartbeatIntervalMs, ...this.heartbeatIntervals.values(), ...taskLeaseMs),
+    );
     if (this.heartbeatTimer && delay === this.heartbeatDelayMs) return;
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.heartbeatDelayMs = delay;
