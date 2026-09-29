@@ -326,6 +326,37 @@ How it behaves:
 A complete example (HTML page, handler and backend) lives in
 [`examples/browser-worker/`](examples/browser-worker/).
 
+## Phone runtime nodes (device sessions)
+
+Mobile apps running the embedded Orch8 engine as a runtime node (Swift,
+React Native, Expo, KMP, Flutter) must never ship an operator or any stored
+API key — anyone can extract it from the app binary. Your backend holds the
+operator key and mints a short-lived **device session** (`dst_…`) for one
+device and the phone's persisted `nodeRuntimeId`; the app fetches it through
+the mobile SDK's token provider, which calls again whenever the session
+expires (on a `401`).
+
+```typescript
+import { Orch8Client } from "@orch8.io/sdk";
+
+const orch8 = new Orch8Client({ baseUrl, headers: { "x-api-key": process.env.ORCH8_OPERATOR_KEY! } });
+
+app.post("/api/orch8/device-session", requireLogin, async (req, res) => {
+  // deviceId / nodeRuntimeId come from the app; authorize that this user owns the device.
+  const session = await orch8.createDeviceSession({
+    deviceId: req.body.deviceId,
+    runtimeId: req.body.nodeRuntimeId,
+    handlers: ["scan_document"], // what the phone may claim; [] = delegate only
+    ttlSecs: 3600,               // default 3600, max 86400
+  });
+  res.json({ token: session.token }); // only the token goes to the app
+});
+```
+
+The token reaches only the device's own mobile register / sync / runtime
+routes, the lease protocol as its runtime (allowlisted handlers), and the
+delegation calls for executions it owns; everything else is `403`.
+
 ## Typed step IO (`orch8-typegen`)
 
 `orch8-typegen` turns a sequence file's JSON Schema contracts into TypeScript:

@@ -322,6 +322,34 @@ export interface BrowserSession {
   handlers: string[];
 }
 
+/** Request body of `POST /runtimes/device-sessions`. */
+export interface CreateDeviceSessionRequest {
+  /** The phone's `deviceId` (mobile engine config) the token acts for. */
+  deviceId: string;
+  /** The phone's persisted runtime id (`MobileEngine.nodeRuntimeId()`). */
+  runtimeId: string;
+  /**
+   * Handlers the phone may poll and advertise. Empty (the default) = the
+   * phone only delegates and never claims tasks.
+   */
+  handlers?: string[];
+  /** Token lifetime in seconds (server default 3600, max 86400). */
+  ttlSecs?: number;
+}
+
+/**
+ * A short-lived credential scoped to one phone runtime node (`dst_…`). Hand
+ * only `token` to the app (its token provider); never the operator key.
+ */
+export interface DeviceSession {
+  token: string;
+  deviceId: string;
+  runtimeId: string;
+  /** RFC 3339 timestamp. */
+  expiresAt: string;
+  handlers: string[];
+}
+
 /** Body of `POST /workers/tasks/{id}/release`. */
 export interface ReleaseRequest {
   worker_id: string;

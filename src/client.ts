@@ -71,6 +71,8 @@ import type {
   ReleaseRequest,
   CreateBrowserSessionRequest,
   BrowserSession,
+  CreateDeviceSessionRequest,
+  DeviceSession,
 } from "./types.js";
 import { ContinuityClient } from "./continuity.js";
 import { JobsClient } from "./jobs.js";
@@ -781,6 +783,44 @@ export class Orch8Client {
       runtimeId: res.runtime_id,
       expiresAt: res.expires_at,
       handlers: res.handlers ?? request.handlers,
+    };
+  }
+
+  /**
+   * Mint a short-lived device session for a phone runtime node
+   * (`POST /runtimes/device-sessions`). Call this from your app backend with
+   * an operator/admin key when the phone's token provider asks for a token,
+   * for the device id and `nodeRuntimeId()` the phone reports; return only
+   * `token` to the app. The `dst_…` token is bound to that device, runtime and
+   * handler allowlist and reaches only the mobile node routes (register, sync,
+   * leases, delegation). Never ship an operator key in an app binary.
+   */
+  async createDeviceSession(request: CreateDeviceSessionRequest): Promise<DeviceSession> {
+    if (typeof request.deviceId !== "string" || request.deviceId.trim() === "") {
+      throw new TypeError("createDeviceSession requires a deviceId");
+    }
+    if (typeof request.runtimeId !== "string" || request.runtimeId.trim() === "") {
+      throw new TypeError("createDeviceSession requires a runtimeId (the phone's nodeRuntimeId)");
+    }
+    const body: Record<string, unknown> = {
+      device_id: request.deviceId,
+      runtime_id: request.runtimeId,
+      handlers: request.handlers ?? [],
+    };
+    if (request.ttlSecs !== undefined) body.ttl_secs = request.ttlSecs;
+    const res = await this.post<{
+      token: string;
+      device_id: string;
+      runtime_id: string;
+      expires_at: string;
+      handlers?: string[];
+    }>("/runtimes/device-sessions", body);
+    return {
+      token: res.token,
+      deviceId: res.device_id,
+      runtimeId: res.runtime_id,
+      expiresAt: res.expires_at,
+      handlers: res.handlers ?? request.handlers ?? [],
     };
   }
 

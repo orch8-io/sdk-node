@@ -4,6 +4,10 @@
 
 ### Added
 
+- `Orch8Client.createDeviceSession({ deviceId, runtimeId, handlers?, ttlSecs? })`
+  (`POST /runtimes/device-sessions`): mint a short-lived `dst_` token scoped to one
+  phone runtime node on your backend and hand only the token to the mobile SDK's
+  token provider, instead of shipping an API key in the app.
 - `Orch8Worker` `capabilities` option: advertises `RuntimeCapabilities` (kind,
   trust, hardware, regions, plugins, ...) with every poll, bound to the worker
   id with a fresh five-minute window, so the worker can claim tasks that carry

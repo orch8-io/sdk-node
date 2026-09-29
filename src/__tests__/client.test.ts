@@ -1076,6 +1076,45 @@ describe("Orch8Client", () => {
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
+    it("createDeviceSession POSTs snake_case and returns a camelCase session", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        token: "dst_1", device_id: "iphone-1", runtime_id: "rt-1",
+        expires_at: "2026-09-29T12:00:00Z", handlers: ["scan"],
+      }, 201));
+
+      const session = await client.createDeviceSession({
+        deviceId: "iphone-1", runtimeId: "rt-1", handlers: ["scan"], ttlSecs: 1800,
+      });
+
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe("http://localhost:8080/runtimes/device-sessions");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(init.body)).toEqual({
+        device_id: "iphone-1", runtime_id: "rt-1", handlers: ["scan"], ttl_secs: 1800,
+      });
+      expect(session).toEqual({
+        token: "dst_1", deviceId: "iphone-1", runtimeId: "rt-1",
+        expiresAt: "2026-09-29T12:00:00Z", handlers: ["scan"],
+      });
+    });
+
+    it("createDeviceSession defaults to a delegation-only session", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        token: "dst_2", device_id: "d", runtime_id: "r", expires_at: "2026-09-29T12:00:00Z",
+      }));
+      const session = await client.createDeviceSession({ deviceId: "d", runtimeId: "r" });
+      expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({
+        device_id: "d", runtime_id: "r", handlers: [],
+      });
+      expect(session.handlers).toEqual([]);
+    });
+
+    it("createDeviceSession rejects a missing device or runtime id", async () => {
+      await expect(client.createDeviceSession({ deviceId: " ", runtimeId: "r" })).rejects.toThrow(/deviceId/);
+      await expect(client.createDeviceSession({ deviceId: "d", runtimeId: "" })).rejects.toThrow(/runtimeId/);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     it("releaseTask POSTs to /workers/tasks/:id/release", async () => {
       mockFetch.mockResolvedValueOnce(noContentResponse());
       await client.releaseTask("task-1", { worker_id: "w", claim_epoch: 2, started: false });
