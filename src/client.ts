@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 
 import type {
   Orch8ClientConfig,
@@ -75,6 +74,7 @@ import type {
   DeviceSession,
 } from "./types.js";
 import { ContinuityClient } from "./continuity.js";
+import { randomUUID } from "./internal/random-uuid.js";
 import { JobsClient } from "./jobs.js";
 
 export type HttpMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
